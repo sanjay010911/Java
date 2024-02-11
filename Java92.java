@@ -8,11 +8,11 @@ class Employee {
     }
 
     public void display() {
-        System.out.println("Employee: " + name);
+        System.out.println("Name of the class is Employee ");
     }
 
     public void calcSalary() {
-        System.out.println("Salary: $" + basicSalary);
+        System.out.println("Salary of employee is " + basicSalary);
     }
 }
 
@@ -26,7 +26,7 @@ class Engineer extends Employee {
 
     public void calcSalary() {
         double totalSalary = basicSalary + bonus;
-        System.out.println("Engineer Salary: $" + totalSalary);
+        System.out.println("Salary of employee is " + totalSalary);
     }
 }
 
