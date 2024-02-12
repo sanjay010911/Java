@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -66,6 +66,7 @@ import com.mysql.cj.util.StringUtils;
  * MySQL 'authentication_kerberos_client' authentication plugin.
  */
 public class AuthenticationKerberosClient implements AuthenticationPlugin<NativePacketPayload> {
+
     public static String PLUGIN_NAME = "authentication_kerberos_client";
 
     private static final String LOGIN_CONFIG_ENTRY = "MySQLConnectorJ";
@@ -73,9 +74,9 @@ public class AuthenticationKerberosClient implements AuthenticationPlugin<Native
 
     private String sourceOfAuthData = PLUGIN_NAME;
 
-    private MysqlCallbackHandler usernameCallbackHandler;
-    private String user;
-    private String password;
+    private MysqlCallbackHandler usernameCallbackHandler = null;
+    private String user = null;
+    private String password = null;
     private String userPrincipalName = null;
 
     private Subject subject = null;
@@ -93,7 +94,7 @@ public class AuthenticationKerberosClient implements AuthenticationPlugin<Native
         }
     };
 
-    private SaslClient saslClient;
+    private SaslClient saslClient = null;
 
     @Override
     public void init(Protocol<NativePacketPayload> prot, MysqlCallbackHandler cbh) {
@@ -117,6 +118,7 @@ public class AuthenticationKerberosClient implements AuthenticationPlugin<Native
     @Override
     public void destroy() {
         reset();
+        this.usernameCallbackHandler = null;
         this.userPrincipalName = null;
         this.subject = null;
         this.cachedPrincipalName = null;
@@ -153,10 +155,12 @@ public class AuthenticationKerberosClient implements AuthenticationPlugin<Native
                     this.user = this.cachedPrincipalName;
                 }
             } catch (CJException e) {
-                // Fall-back to system login user.
+                // Fall back to system login user.
                 this.user = System.getProperty("user.name");
             }
-            this.usernameCallbackHandler.handle(new UsernameCallback(this.user));
+            if (this.usernameCallbackHandler != null) {
+                this.usernameCallbackHandler.handle(new UsernameCallback(this.user));
+            }
         }
     }
 
@@ -169,9 +173,9 @@ public class AuthenticationKerberosClient implements AuthenticationPlugin<Native
     public boolean nextAuthenticationStep(NativePacketPayload fromServer, List<NativePacketPayload> toServer) {
         toServer.clear();
 
-        if (!this.sourceOfAuthData.equals(PLUGIN_NAME)) {
-            // Couldn't do anything with whatever payload comes from the server, so just skip this iteration and wait for a Protocol::AuthSwitchRequest.
-            toServer.add(new NativePacketPayload(new byte[0]));
+        if (!this.sourceOfAuthData.equals(PLUGIN_NAME) || fromServer.getPayloadLength() == 0) {
+            // Cannot do anything with whatever payload comes from the server, so just skip this iteration and wait for a Protocol::AuthSwitchRequest or a
+            // Protocol::AuthNextFactor.
             return true;
         }
 
@@ -213,7 +217,7 @@ public class AuthenticationKerberosClient implements AuthenticationPlugin<Native
                     this.saslClient = Subject.doAs(this.subject, (PrivilegedExceptionAction<SaslClient>) () -> Sasl
                             .createSaslClient(new String[] { AUTHENTICATION_MECHANISM }, null, localPrimary, localInstance, null, null));
                 } catch (PrivilegedActionException e) {
-                    // SaslException is the only checked exception that can be thrown. 
+                    // SaslException is the only checked exception that can be thrown.
                     throw (SaslException) e.getException();
                 }
 
@@ -234,9 +238,9 @@ public class AuthenticationKerberosClient implements AuthenticationPlugin<Native
                 Subject.doAs(this.subject, (PrivilegedExceptionAction<Void>) () -> {
                     byte[] response = this.saslClient.evaluateChallenge(fromServer.readBytes(StringSelfDataType.STRING_EOF));
                     if (response != null) {
-                        NativePacketPayload bresp = new NativePacketPayload(response);
-                        bresp.setPosition(0);
-                        toServer.add(bresp);
+                        NativePacketPayload packet = new NativePacketPayload(response);
+                        packet.setPosition(0);
+                        toServer.add(packet);
                     }
                     return null;
                 });
@@ -262,6 +266,7 @@ public class AuthenticationKerberosClient implements AuthenticationPlugin<Native
             final String localUser = this.userPrincipalName;
             final boolean debug = Boolean.getBoolean("sun.security.jgss.debug");
             loginConfig = new Configuration() {
+
                 @Override
                 public AppConfigurationEntry[] getAppConfigurationEntry(String name) {
                     Map<String, String> options = new HashMap<>();
@@ -274,6 +279,7 @@ public class AuthenticationKerberosClient implements AuthenticationPlugin<Native
                     return new AppConfigurationEntry[] { new AppConfigurationEntry("com.sun.security.auth.module.Krb5LoginModule",
                             AppConfigurationEntry.LoginModuleControlFlag.REQUIRED, options) };
                 }
+
             };
         }
 
@@ -288,4 +294,5 @@ public class AuthenticationKerberosClient implements AuthenticationPlugin<Native
             throw ExceptionFactory.createException(Messages.getString("AuthenticationKerberosClientPlugin.FailAuthenticateUser"), e);
         }
     }
+
 }

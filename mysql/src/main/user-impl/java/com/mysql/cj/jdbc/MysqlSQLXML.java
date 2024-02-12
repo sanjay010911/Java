@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -42,6 +42,7 @@ import java.io.Writer;
 import java.sql.SQLException;
 import java.sql.SQLXML;
 
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.stream.XMLInputFactory;
@@ -65,7 +66,9 @@ import javax.xml.transform.stream.StreamSource;
 import org.xml.sax.Attributes;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
+import org.xml.sax.XMLReader;
 import org.xml.sax.helpers.DefaultHandler;
+import org.xml.sax.helpers.XMLReaderFactory;
 
 import com.mysql.cj.Messages;
 import com.mysql.cj.exceptions.ExceptionInterceptor;
@@ -125,7 +128,6 @@ public class MysqlSQLXML implements SQLXML {
         this.owningResultSet = null;
         this.workingWithResult = false;
         this.isClosed = true;
-
     }
 
     @Override
@@ -199,56 +201,54 @@ public class MysqlSQLXML implements SQLXML {
 
         if (clazz == null || clazz.equals(SAXSource.class)) {
 
-            InputSource inputSource = null;
+            try {
+                XMLReader reader = XMLReaderFactory.createXMLReader();
+                // According to https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html
+                reader.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+                setFeature(reader, "http://apache.org/xml/features/disallow-doctype-decl", true);
+                setFeature(reader, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+                setFeature(reader, "http://xml.org/sax/features/external-general-entities", false);
+                setFeature(reader, "http://xml.org/sax/features/external-parameter-entities", false);
 
-            if (this.fromResultSet) {
-                inputSource = new InputSource(this.owningResultSet.getCharacterStream(this.columnIndexOfXml));
-            } else {
-                inputSource = new InputSource(new StringReader(this.stringRep));
+                return (T) new SAXSource(reader, this.fromResultSet ? new InputSource(this.owningResultSet.getCharacterStream(this.columnIndexOfXml))
+                        : new InputSource(new StringReader(this.stringRep)));
+            } catch (SAXException ex) {
+                SQLException sqlEx = SQLError.createSQLException(ex.getMessage(), MysqlErrorNumbers.SQL_STATE_ILLEGAL_ARGUMENT, ex, this.exceptionInterceptor);
+                throw sqlEx;
             }
 
-            return (T) new SAXSource(inputSource);
         } else if (clazz.equals(DOMSource.class)) {
             try {
                 DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
                 builderFactory.setNamespaceAware(true);
+
+                // According to https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html
+                setFeature(builderFactory, XMLConstants.FEATURE_SECURE_PROCESSING, true);
+                setFeature(builderFactory, "http://apache.org/xml/features/disallow-doctype-decl", true);
+                setFeature(builderFactory, "http://xml.org/sax/features/external-general-entities", false);
+                setFeature(builderFactory, "http://xml.org/sax/features/external-parameter-entities", false);
+                setFeature(builderFactory, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+                builderFactory.setXIncludeAware(false);
+                builderFactory.setExpandEntityReferences(false);
+
+                builderFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+
                 DocumentBuilder builder = builderFactory.newDocumentBuilder();
 
-                InputSource inputSource = null;
-
-                if (this.fromResultSet) {
-                    inputSource = new InputSource(this.owningResultSet.getCharacterStream(this.columnIndexOfXml));
-                } else {
-                    inputSource = new InputSource(new StringReader(this.stringRep));
-                }
-
-                return (T) new DOMSource(builder.parse(inputSource));
+                return (T) new DOMSource(builder.parse(this.fromResultSet ? new InputSource(this.owningResultSet.getCharacterStream(this.columnIndexOfXml))
+                        : new InputSource(new StringReader(this.stringRep))));
             } catch (Throwable t) {
                 SQLException sqlEx = SQLError.createSQLException(t.getMessage(), MysqlErrorNumbers.SQL_STATE_ILLEGAL_ARGUMENT, t, this.exceptionInterceptor);
                 throw sqlEx;
             }
 
         } else if (clazz.equals(StreamSource.class)) {
-            Reader reader = null;
+            return (T) new StreamSource(this.fromResultSet ? this.owningResultSet.getCharacterStream(this.columnIndexOfXml) : new StringReader(this.stringRep));
 
-            if (this.fromResultSet) {
-                reader = this.owningResultSet.getCharacterStream(this.columnIndexOfXml);
-            } else {
-                reader = new StringReader(this.stringRep);
-            }
-
-            return (T) new StreamSource(reader);
         } else if (clazz.equals(StAXSource.class)) {
             try {
-                Reader reader = null;
-
-                if (this.fromResultSet) {
-                    reader = this.owningResultSet.getCharacterStream(this.columnIndexOfXml);
-                } else {
-                    reader = new StringReader(this.stringRep);
-                }
-
-                return (T) new StAXSource(this.inputFactory.createXMLStreamReader(reader));
+                return (T) new StAXSource(this.inputFactory.createXMLStreamReader(
+                        this.fromResultSet ? this.owningResultSet.getCharacterStream(this.columnIndexOfXml) : new StringReader(this.stringRep)));
             } catch (XMLStreamException ex) {
                 SQLException sqlEx = SQLError.createSQLException(ex.getMessage(), MysqlErrorNumbers.SQL_STATE_ILLEGAL_ARGUMENT, ex, this.exceptionInterceptor);
                 throw sqlEx;
@@ -256,6 +256,18 @@ public class MysqlSQLXML implements SQLXML {
         } else {
             throw SQLError.createSQLException(Messages.getString("MysqlSQLXML.2", new Object[] { clazz.toString() }),
                     MysqlErrorNumbers.SQL_STATE_ILLEGAL_ARGUMENT, this.exceptionInterceptor);
+        }
+    }
+
+    private static void setFeature(Object factory, String name, boolean value) {
+        try {
+            if (factory instanceof DocumentBuilderFactory) {
+                ((DocumentBuilderFactory) factory).setFeature(name, value);
+            } else if (factory instanceof XMLReader) {
+                ((XMLReader) factory).setFeature(name, value);
+            }
+        } catch (Exception ignore) {
+            // no-op
         }
     }
 
@@ -336,7 +348,6 @@ public class MysqlSQLXML implements SQLXML {
     }
 
     private Reader binaryInputStreamStreamToReader(ByteArrayOutputStream out) {
-
         try {
             // There's got to be an easier way to do this, but I don't feel like coding up Appendix F of the XML Spec myself, when there's a reusable way to do
             // it, and we can warn folks away from BINARY xml streams that have to be parsed to determine the character encoding :P
@@ -391,7 +402,7 @@ public class MysqlSQLXML implements SQLXML {
 
     protected synchronized Reader serializeAsCharacterStream() throws SQLException {
         checkClosed();
-        if (this.workingWithResult) {
+        if (this.workingWithResult || this.owningResultSet == null) {
             // figure out what kind of result
             if (this.stringRep != null) {
                 return new StringReader(this.stringRep);
@@ -464,16 +475,16 @@ public class MysqlSQLXML implements SQLXML {
      * The SimpleSaxToReader class is an adaptation of the SAX "Writer"
      * example from the Apache XercesJ-2 Project. The license for this
      * code is as follows:
-     * 
+     *
      * Licensed to the Apache Software Foundation (ASF) under one or more
      * contributor license agreements. See the NOTICE file distributed with
      * this work for additional information regarding copyright ownership.
      * The ASF licenses this file to You under the Apache License, Version 2.0
      * (the "License"); you may not use this file except in compliance with
      * the License. You may obtain a copy of the License at
-     * 
+     *
      * http://www.apache.org/licenses/LICENSE-2.0
-     * 
+     *
      * Unless required by applicable law or agreed to in writing, software
      * distributed under the License is distributed on an "AS IS" BASIS,
      * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -482,6 +493,7 @@ public class MysqlSQLXML implements SQLXML {
      */
 
     class SimpleSaxToReader extends DefaultHandler {
+
         StringBuilder buf = new StringBuilder();
 
         @Override
@@ -496,7 +508,6 @@ public class MysqlSQLXML implements SQLXML {
 
         @Override
         public void startElement(String namespaceURI, String sName, String qName, Attributes attrs) throws SAXException {
-
             this.buf.append("<");
             this.buf.append(qName);
 
@@ -565,7 +576,6 @@ public class MysqlSQLXML implements SQLXML {
         }
 
         private void escapeCharsForXml(char[] buffer, int offset, int len, boolean isAttributeData) {
-
             if (buffer == null) {
                 return;
             }
@@ -605,7 +615,7 @@ public class MysqlSQLXML implements SQLXML {
 
                 default:
 
-                    if (((c >= 0x01 && c <= 0x1F && c != 0x09 && c != 0x0A) || (c >= 0x7F && c <= 0x9F) || c == 0x2028)
+                    if (c >= 0x01 && c <= 0x1F && c != 0x09 && c != 0x0A || c >= 0x7F && c <= 0x9F || c == 0x2028
                             || isAttributeData && (c == 0x09 || c == 0x0A)) {
                         this.buf.append("&#x");
                         this.buf.append(Integer.toHexString(c).toUpperCase());
@@ -615,5 +625,7 @@ public class MysqlSQLXML implements SQLXML {
                     }
             }
         }
+
     }
+
 }

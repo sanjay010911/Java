@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -29,9 +29,7 @@
 
 package com.mysql.cj.log;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-
+import com.mysql.cj.exceptions.CJException;
 import com.mysql.cj.exceptions.ExceptionFactory;
 import com.mysql.cj.exceptions.WrongArgumentException;
 import com.mysql.cj.util.Util;
@@ -44,7 +42,7 @@ public class LogFactory {
     /**
      * Returns a logger instance of the given class, with the given instance
      * name.
-     * 
+     *
      * @param className
      *            the class to instantiate
      * @param instanceName
@@ -52,7 +50,6 @@ public class LogFactory {
      * @return a logger instance
      */
     public static Log getLogger(String className, String instanceName) {
-
         if (className == null) {
             throw ExceptionFactory.createException(WrongArgumentException.class, "Logger class can not be NULL");
         }
@@ -62,34 +59,19 @@ public class LogFactory {
         }
 
         try {
-            Class<?> loggerClass = null;
-
-            try {
-                loggerClass = Class.forName(className);
-            } catch (ClassNotFoundException nfe) {
-                loggerClass = Class.forName(Util.getPackageName(LogFactory.class) + "." + className);
+            return Util.getInstance(Log.class, className, new Class<?>[] { String.class }, new Object[] { instanceName }, null);
+        } catch (CJException e1) {
+            if (ClassNotFoundException.class.isInstance(e1.getCause())) {
+                // Retry with package name prepended.
+                try {
+                    return Util.getInstance(Log.class, Util.getPackageName(LogFactory.class) + "." + className, new Class<?>[] { String.class },
+                            new Object[] { instanceName }, null);
+                } catch (CJException e2) {
+                    throw e1;
+                }
             }
-
-            Constructor<?> constructor = loggerClass.getConstructor(new Class<?>[] { String.class });
-
-            return (Log) constructor.newInstance(new Object[] { instanceName });
-        } catch (ClassNotFoundException cnfe) {
-            throw ExceptionFactory.createException(WrongArgumentException.class, "Unable to load class for logger '" + className + "'", cnfe);
-        } catch (NoSuchMethodException nsme) {
-            throw ExceptionFactory.createException(WrongArgumentException.class,
-                    "Logger class does not have a single-arg constructor that takes an instance name", nsme);
-        } catch (InstantiationException inse) {
-            throw ExceptionFactory.createException(WrongArgumentException.class,
-                    "Unable to instantiate logger class '" + className + "', exception in constructor?", inse);
-        } catch (InvocationTargetException ite) {
-            throw ExceptionFactory.createException(WrongArgumentException.class,
-                    "Unable to instantiate logger class '" + className + "', exception in constructor?", ite);
-        } catch (IllegalAccessException iae) {
-            throw ExceptionFactory.createException(WrongArgumentException.class,
-                    "Unable to instantiate logger class '" + className + "', constructor not public", iae);
-        } catch (ClassCastException cce) {
-            throw ExceptionFactory.createException(WrongArgumentException.class,
-                    "Logger class '" + className + "' does not implement the '" + Log.class.getName() + "' interface", cce);
+            throw e1;
         }
     }
+
 }

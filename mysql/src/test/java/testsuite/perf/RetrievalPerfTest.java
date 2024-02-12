@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -43,6 +43,7 @@ import testsuite.BaseTestCase;
  * Simplistic test for performance regression.
  */
 public class RetrievalPerfTest extends BaseTestCase {
+
     private static final int NUM_TESTS = 10000;
 
     private static final int NUM_ROWS = 80;
@@ -62,12 +63,13 @@ public class RetrievalPerfTest extends BaseTestCase {
 
     /**
      * Tests retrieval from the query cache
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testRetrievalCached() throws Exception {
-        assumeTrue(((MysqlConnection) this.conn).getSession().getServerSession().isQueryCacheEnabled());
+        assumeTrue(((MysqlConnection) this.conn).getSession().getServerSession().isQueryCacheEnabled(),
+                "This test requires the server with enabled query cache.");
 
         this.stmt.executeUpdate("SET QUERY_CACHE_TYPE = DEMAND");
 
@@ -80,7 +82,7 @@ public class RetrievalPerfTest extends BaseTestCase {
             this.rs = this.stmt.executeQuery("SELECT SQL_CACHE * FROM retrievalPerfTestHeap");
 
             long queryEnd = System.currentTimeMillis();
-            averageQueryTimeMs += ((double) (queryEnd - queryBegin) / NUM_TESTS);
+            averageQueryTimeMs += (double) (queryEnd - queryBegin) / NUM_TESTS;
 
             long traverseBegin = System.currentTimeMillis();
 
@@ -90,13 +92,13 @@ public class RetrievalPerfTest extends BaseTestCase {
             }
 
             long traverseEnd = System.currentTimeMillis();
-            averageTraversalTimeMs += ((double) (traverseEnd - traverseBegin) / NUM_TESTS);
+            averageTraversalTimeMs += (double) (traverseEnd - traverseBegin) / NUM_TESTS;
         }
 
         double fullEnd = System.currentTimeMillis();
         double fullTime = (fullEnd - fullBegin) / 1000;
         double queriesPerSec = NUM_TESTS / fullTime;
-        double rowsPerSec = (NUM_ROWS * NUM_TESTS) / fullTime;
+        double rowsPerSec = NUM_ROWS * NUM_TESTS / fullTime;
         System.out.println("\nQuery Cache From Heap Retrieval\n");
         System.out.println("Full test took: " + fullTime + " seconds.");
         System.out.println("Queries/second: " + queriesPerSec);
@@ -110,7 +112,7 @@ public class RetrievalPerfTest extends BaseTestCase {
 
     /**
      * Tests retrieval from HEAP tables
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -124,7 +126,7 @@ public class RetrievalPerfTest extends BaseTestCase {
             this.rs = this.stmt.executeQuery("SELECT * FROM retrievalPerfTestHeap");
 
             long queryEnd = System.currentTimeMillis();
-            averageQueryTimeMs += ((double) (queryEnd - queryBegin) / NUM_TESTS);
+            averageQueryTimeMs += (double) (queryEnd - queryBegin) / NUM_TESTS;
 
             long traverseBegin = System.currentTimeMillis();
 
@@ -134,13 +136,13 @@ public class RetrievalPerfTest extends BaseTestCase {
             }
 
             long traverseEnd = System.currentTimeMillis();
-            averageTraversalTimeMs += ((double) (traverseEnd - traverseBegin) / NUM_TESTS);
+            averageTraversalTimeMs += (double) (traverseEnd - traverseBegin) / NUM_TESTS;
         }
 
         double fullEnd = System.currentTimeMillis();
         double fullTime = (fullEnd - fullBegin) / 1000;
         double queriesPerSec = NUM_TESTS / fullTime;
-        double rowsPerSec = (NUM_ROWS * NUM_TESTS) / fullTime;
+        double rowsPerSec = NUM_ROWS * NUM_TESTS / fullTime;
         System.out.println("\nHEAP Table Retrieval\n");
         System.out.println("Full test took: " + fullTime + " seconds.");
         System.out.println("Queries/second: " + queriesPerSec);
@@ -154,7 +156,7 @@ public class RetrievalPerfTest extends BaseTestCase {
 
     /**
      * Tests retrieval speed from MyISAM type tables
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -168,7 +170,7 @@ public class RetrievalPerfTest extends BaseTestCase {
             this.rs = this.stmt.executeQuery("SELECT * FROM retrievalPerfTestMyIsam");
 
             long queryEnd = System.currentTimeMillis();
-            averageQueryTimeMs += ((double) (queryEnd - queryBegin) / NUM_TESTS);
+            averageQueryTimeMs += (double) (queryEnd - queryBegin) / NUM_TESTS;
 
             long traverseBegin = System.currentTimeMillis();
 
@@ -178,13 +180,13 @@ public class RetrievalPerfTest extends BaseTestCase {
             }
 
             long traverseEnd = System.currentTimeMillis();
-            averageTraversalTimeMs += ((double) (traverseEnd - traverseBegin) / NUM_TESTS);
+            averageTraversalTimeMs += (double) (traverseEnd - traverseBegin) / NUM_TESTS;
         }
 
         double fullEnd = System.currentTimeMillis();
         double fullTime = (fullEnd - fullBegin) / 1000;
         double queriesPerSec = NUM_TESTS / fullTime;
-        double rowsPerSec = (NUM_ROWS * NUM_TESTS) / fullTime;
+        double rowsPerSec = NUM_ROWS * NUM_TESTS / fullTime;
         System.out.println("\nMyIsam Retrieval\n");
         System.out.println("Full test took: " + fullTime + " seconds.");
         System.out.println("Queries/second: " + queriesPerSec);
@@ -195,4 +197,5 @@ public class RetrievalPerfTest extends BaseTestCase {
         // We're doing something wrong if we can't beat 45 seconds :(
         assertTrue(fullTime < 45);
     }
+
 }

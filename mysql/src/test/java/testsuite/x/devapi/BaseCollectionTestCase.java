@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2017, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -29,20 +29,25 @@
 
 package testsuite.x.devapi;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
 import java.util.Random;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
+import com.mysql.cj.conf.PropertyDefinitions;
 import com.mysql.cj.xdevapi.Collection;
 
 public class BaseCollectionTestCase extends DevApiBaseTestCase {
+
     /** Collection for testing. */
     protected Collection collection;
     protected String collectionName;
 
     @BeforeEach
     public void setupCollectionTest() {
+        assumeTrue(this.isSetForXTests, PropertyDefinitions.SYSP_testsuite_url_mysqlx + " must be set to run this test.");
         if (setupTestSession()) {
             this.collectionName = "CollectionTest-" + new Random().nextInt(1000);
             dropCollection(this.collectionName);
@@ -62,4 +67,5 @@ public class BaseCollectionTestCase extends DevApiBaseTestCase {
             destroyTestSession();
         }
     }
+
 }

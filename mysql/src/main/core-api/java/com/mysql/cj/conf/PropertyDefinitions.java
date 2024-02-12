@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -40,6 +40,7 @@ import com.mysql.cj.log.StandardLogger;
 import com.mysql.cj.util.PerVmServerConfigCacheFactory;
 
 public class PropertyDefinitions {
+
     /*
      * Built-in system properties.
      */
@@ -50,7 +51,6 @@ public class PropertyDefinitions {
     public static final String SYSP_os_name = "os.name";
     public static final String SYSP_os_arch = "os.arch";
     public static final String SYSP_os_version = "os.version";
-    public static final String SYSP_file_encoding = "file.encoding";
 
     /*
      * Operational system properties.
@@ -61,21 +61,12 @@ public class PropertyDefinitions {
      * Testsuite system properties.
      */
     public static final String SYSP_testsuite_url /*                          */ = "com.mysql.cj.testsuite.url";
-    public final static String SYSP_testsuite_url_admin /*                    */ = "com.mysql.cj.testsuite.url.admin";
     public static final String SYSP_testsuite_url_cluster /*                  */ = "com.mysql.cj.testsuite.url.cluster";
-    /** Connection string to server compiled with OpenSSL */
-    public static final String SYSP_testsuite_url_openssl /*                  */ = "com.mysql.cj.testsuite.url.openssl";
 
     public static final String SYSP_testsuite_url_mysqlx /*                   */ = "com.mysql.cj.testsuite.mysqlx.url";
-    public static final String SYSP_testsuite_url_mysqlx_openssl /*           */ = "com.mysql.cj.testsuite.mysqlx.url.openssl";
 
     public static final String SYSP_testsuite_cantGrant /*                    */ = "com.mysql.cj.testsuite.cantGrant";
-    public static final String SYSP_testsuite_disable_multihost_tests /*      */ = "com.mysql.cj.testsuite.disable.multihost.tests"; // TODO should be more specific for different types of multi-host configs
-
     public static final String SYSP_testsuite_unavailable_host /*             */ = "com.mysql.cj.testsuite.unavailable.host";
-
-    /** Option to indicate that the server was installed without the test package */
-    public static final String SYSP_testsuite_no_server_testsuite /*          */ = "com.mysql.cj.testsuite.no.server.testsuite";
 
     /** For testsuite.regression.DataSourceRegressionTest */
     public static final String SYSP_testsuite_ds_host /*                      */ = "com.mysql.cj.testsuite.ds.host";
@@ -152,7 +143,7 @@ public class PropertyDefinitions {
     /*
      * Property enums.
      */
-    public enum ZeroDatetimeBehavior { // zeroDateTimeBehavior 
+    public enum ZeroDatetimeBehavior { // zeroDateTimeBehavior
         CONVERT_TO_NULL, EXCEPTION, ROUND;
     }
 
@@ -196,17 +187,38 @@ public class PropertyDefinitions {
                         Messages.getString("ConnectionProperties.Password"), Messages.getString("ConnectionProperties.allVersions"), CATEGORY_AUTH,
                         Integer.MIN_VALUE + 2),
 
+                new StringPropertyDefinition(PropertyKey.password1, DEFAULT_VALUE_NULL_STRING, RUNTIME_NOT_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.Password1"), "8.0.28", CATEGORY_AUTH, Integer.MIN_VALUE + 3),
+
+                new StringPropertyDefinition(PropertyKey.password2, DEFAULT_VALUE_NULL_STRING, RUNTIME_NOT_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.Password2"), "8.0.28", CATEGORY_AUTH, Integer.MIN_VALUE + 4),
+
+                new StringPropertyDefinition(PropertyKey.password3, DEFAULT_VALUE_NULL_STRING, RUNTIME_NOT_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.Password3"), "8.0.28", CATEGORY_AUTH, Integer.MIN_VALUE + 5),
+
                 new StringPropertyDefinition(PropertyKey.authenticationPlugins, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
-                        Messages.getString("ConnectionProperties.authenticationPlugins"), "5.1.19", CATEGORY_AUTH, Integer.MIN_VALUE + 3),
+                        Messages.getString("ConnectionProperties.authenticationPlugins"), "5.1.19", CATEGORY_AUTH, Integer.MIN_VALUE + 6),
 
                 new StringPropertyDefinition(PropertyKey.disabledAuthenticationPlugins, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
-                        Messages.getString("ConnectionProperties.disabledAuthenticationPlugins"), "5.1.19", CATEGORY_AUTH, Integer.MIN_VALUE + 4),
+                        Messages.getString("ConnectionProperties.disabledAuthenticationPlugins"), "5.1.19", CATEGORY_AUTH, Integer.MIN_VALUE + 7),
 
                 new StringPropertyDefinition(PropertyKey.defaultAuthenticationPlugin, "mysql_native_password", RUNTIME_MODIFIABLE,
-                        Messages.getString("ConnectionProperties.defaultAuthenticationPlugin"), "5.1.19", CATEGORY_AUTH, Integer.MIN_VALUE + 5),
+                        Messages.getString("ConnectionProperties.defaultAuthenticationPlugin"), "5.1.19", CATEGORY_AUTH, Integer.MIN_VALUE + 8),
 
                 new StringPropertyDefinition(PropertyKey.ldapServerHostname, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
-                        Messages.getString("ConnectionProperties.ldapServerHostname"), "8.0.23", CATEGORY_AUTH, Integer.MIN_VALUE + 6),
+                        Messages.getString("ConnectionProperties.ldapServerHostname"), "8.0.23", CATEGORY_AUTH, Integer.MIN_VALUE + 9),
+
+                new StringPropertyDefinition(PropertyKey.ociConfigFile, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.ociConfigFile"), "8.0.27", CATEGORY_AUTH, Integer.MIN_VALUE + 10),
+
+                new StringPropertyDefinition(PropertyKey.ociConfigProfile, "DEFAULT", RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.ociConfigProfile"), "8.0.33", CATEGORY_AUTH, Integer.MIN_VALUE + 11),
+
+                new StringPropertyDefinition(PropertyKey.authenticationFidoCallbackHandler, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.authenticationFidoCallbackHandler"), "8.0.29", CATEGORY_AUTH, Integer.MIN_VALUE + 12),
+
+                new StringPropertyDefinition(PropertyKey.authenticationWebAuthnCallbackHandler, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.authenticationWebAuthnCallbackHandler"), "8.2.0", CATEGORY_AUTH, Integer.MIN_VALUE + 13),
 
                 //
                 // CATEGORY_CONNECTION
@@ -292,6 +304,9 @@ public class PropertyDefinitions {
                 new IntegerPropertyDefinition(PropertyKey.socksProxyPort, 1080, RUNTIME_MODIFIABLE, Messages.getString("ConnectionProperties.socksProxyPort"),
                         "5.1.34", CATEGORY_NETWORK, 2, 0, 65535),
 
+                new BooleanPropertyDefinition(PropertyKey.socksProxyRemoteDns, DEFAULT_VALUE_FALSE, RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.socksProxyRemoteDns"), "8.0.29", CATEGORY_NETWORK, Integer.MIN_VALUE),
+
                 new IntegerPropertyDefinition(PropertyKey.socketTimeout, 0, RUNTIME_MODIFIABLE, Messages.getString("ConnectionProperties.socketTimeout"),
                         "3.0.1", CATEGORY_NETWORK, 10, 0, Integer.MAX_VALUE),
 
@@ -328,7 +343,7 @@ public class PropertyDefinitions {
                 new StringPropertyDefinition(PropertyKey.serverRSAPublicKeyFile, DEFAULT_VALUE_NULL_STRING, RUNTIME_NOT_MODIFIABLE,
                         Messages.getString("ConnectionProperties.serverRSAPublicKeyFile"), "5.1.31", CATEGORY_SECURITY, 2),
 
-                new BooleanPropertyDefinition(PropertyKey.allowPublicKeyRetrieval, DEFAULT_VALUE_FALSE, RUNTIME_NOT_MODIFIABLE,
+                new BooleanPropertyDefinition(PropertyKey.allowPublicKeyRetrieval, DEFAULT_VALUE_FALSE, RUNTIME_MODIFIABLE,
                         Messages.getString("ConnectionProperties.allowPublicKeyRetrieval"), "5.1.31", CATEGORY_SECURITY, 3),
 
                 new EnumPropertyDefinition<>(PropertyKey.sslMode, SslMode.PREFERRED, RUNTIME_MODIFIABLE, Messages.getString("ConnectionProperties.sslMode"),
@@ -358,11 +373,26 @@ public class PropertyDefinitions {
                 new BooleanPropertyDefinition(PropertyKey.fallbackToSystemKeyStore, DEFAULT_VALUE_TRUE, RUNTIME_MODIFIABLE,
                         Messages.getString("ConnectionProperties.fallbackToSystemKeyStore"), "8.0.22", CATEGORY_SECURITY, 12),
 
-                new StringPropertyDefinition(PropertyKey.enabledSSLCipherSuites, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
-                        Messages.getString("ConnectionProperties.enabledSSLCipherSuites"), "5.1.35", CATEGORY_SECURITY, 13),
+                new StringPropertyDefinition(PropertyKey.tlsCiphersuites, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.tlsCiphersuites"), "5.1.35", CATEGORY_SECURITY, 13),
 
-                new StringPropertyDefinition(PropertyKey.enabledTLSProtocols, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
-                        Messages.getString("ConnectionProperties.enabledTLSProtocols"), "8.0.8", CATEGORY_SECURITY, 14),
+                new StringPropertyDefinition(PropertyKey.tlsVersions, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.tlsVersions"), "8.0.8", CATEGORY_SECURITY, 14),
+
+                new BooleanPropertyDefinition(PropertyKey.fipsCompliantJsse, DEFAULT_VALUE_FALSE, RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.fipsCompliantJsse"), "8.1.0", CATEGORY_SECURITY, 15),
+
+                new StringPropertyDefinition(PropertyKey.keyManagerFactoryProvider, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.keyManagerFactoryProvider"), "8.1.0", CATEGORY_SECURITY, 16),
+
+                new StringPropertyDefinition(PropertyKey.trustManagerFactoryProvider, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.trustManagerFactoryProvider"), "8.1.0", CATEGORY_SECURITY, 17),
+
+                new StringPropertyDefinition(PropertyKey.keyStoreProvider, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.keyStoreProvider"), "8.1.0", CATEGORY_SECURITY, 18),
+
+                new StringPropertyDefinition(PropertyKey.sslContextProvider, DEFAULT_VALUE_NULL_STRING, RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.sslContextProvider"), "8.1.0", CATEGORY_SECURITY, 19),
 
                 new BooleanPropertyDefinition(PropertyKey.allowLoadLocalInfile, DEFAULT_VALUE_FALSE, RUNTIME_MODIFIABLE,
                         Messages.getString("ConnectionProperties.loadDataLocal"), "3.0.3", CATEGORY_SECURITY, Integer.MAX_VALUE),
@@ -492,9 +522,6 @@ public class PropertyDefinitions {
                 //
                 // CATEGORY_BLOBS
                 //
-                new BooleanPropertyDefinition(PropertyKey.autoDeserialize, DEFAULT_VALUE_FALSE, RUNTIME_MODIFIABLE,
-                        Messages.getString("ConnectionProperties.autoDeserialize"), "3.1.5", CATEGORY_BLOBS, Integer.MIN_VALUE),
-
                 new MemorySizePropertyDefinition(PropertyKey.blobSendChunkSize, 1024 * 1024, RUNTIME_MODIFIABLE,
                         Messages.getString("ConnectionProperties.blobSendChunkSize"), "3.1.9", CATEGORY_BLOBS, Integer.MIN_VALUE, 0, 0),
 
@@ -527,6 +554,9 @@ public class PropertyDefinitions {
 
                 new BooleanPropertyDefinition(PropertyKey.preserveInstants, DEFAULT_VALUE_TRUE, RUNTIME_MODIFIABLE,
                         Messages.getString("ConnectionProperties.preserveInstants"), "8.0.23", CATEGORY_DATETIMES, Integer.MIN_VALUE),
+
+                new BooleanPropertyDefinition(PropertyKey.treatMysqlDatetimeAsTimestamp, DEFAULT_VALUE_FALSE, RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.treatMysqlDatetimeAsTimestamp"), "8.2.0", CATEGORY_DATETIMES, Integer.MIN_VALUE),
 
                 new BooleanPropertyDefinition(PropertyKey.treatUtilDateAsTimestamp, DEFAULT_VALUE_TRUE, RUNTIME_MODIFIABLE,
                         Messages.getString("ConnectionProperties.treatUtilDateAsTimestamp"), "5.0.5", CATEGORY_DATETIMES, Integer.MIN_VALUE),
@@ -670,7 +700,7 @@ public class PropertyDefinitions {
                         "3.1.9", CATEGORY_PERFORMANCE, Integer.MIN_VALUE),
 
                 new BooleanPropertyDefinition(PropertyKey.elideSetAutoCommits, DEFAULT_VALUE_FALSE, RUNTIME_MODIFIABLE,
-                        Messages.getString("ConnectionProperties.eliseSetAutoCommit"), "3.1.3", CATEGORY_PERFORMANCE, Integer.MIN_VALUE),
+                        Messages.getString("ConnectionProperties.elideSetAutoCommit"), "3.1.3", CATEGORY_PERFORMANCE, Integer.MIN_VALUE),
 
                 new BooleanPropertyDefinition(PropertyKey.enableQueryTimeouts, DEFAULT_VALUE_TRUE, RUNTIME_MODIFIABLE,
                         Messages.getString("ConnectionProperties.enableQueryTimeouts"), "5.0.6", CATEGORY_PERFORMANCE, Integer.MIN_VALUE),
@@ -691,8 +721,8 @@ public class PropertyDefinitions {
                 new IntegerPropertyDefinition(PropertyKey.prepStmtCacheSqlLimit, 256, RUNTIME_MODIFIABLE,
                         Messages.getString("ConnectionProperties.prepStmtCacheSqlLimit"), "3.0.10", CATEGORY_PERFORMANCE, 11, 1, Integer.MAX_VALUE),
 
-                new StringPropertyDefinition(PropertyKey.parseInfoCacheFactory, PerConnectionLRUFactory.class.getName(), RUNTIME_MODIFIABLE,
-                        Messages.getString("ConnectionProperties.parseInfoCacheFactory"), "5.1.1", CATEGORY_PERFORMANCE, 12),
+                new StringPropertyDefinition(PropertyKey.queryInfoCacheFactory, PerConnectionLRUFactory.class.getName(), RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.queryInfoCacheFactory"), "5.1.1", CATEGORY_PERFORMANCE, 12),
 
                 new BooleanPropertyDefinition(PropertyKey.rewriteBatchedStatements, DEFAULT_VALUE_FALSE, RUNTIME_MODIFIABLE,
                         Messages.getString("ConnectionProperties.rewriteBatchedStatements"), "3.1.13", CATEGORY_PERFORMANCE, Integer.MIN_VALUE),
@@ -734,6 +764,9 @@ public class PropertyDefinitions {
                 new IntegerPropertyDefinition(PropertyKey.maxQuerySizeToLog, 2048, RUNTIME_MODIFIABLE,
                         Messages.getString("ConnectionProperties.maxQuerySizeToLog"), "3.1.3", CATEGORY_DEBUGING_PROFILING, 3, 0, Integer.MAX_VALUE),
 
+                new IntegerPropertyDefinition(PropertyKey.maxByteArrayAsHex, 1024, RUNTIME_MODIFIABLE,
+                        Messages.getString("ConnectionProperties.maxByteArrayAsHex"), "8.0.31", CATEGORY_DEBUGING_PROFILING, 4, 0, Integer.MAX_VALUE),
+
                 new BooleanPropertyDefinition(PropertyKey.profileSQL, DEFAULT_VALUE_FALSE, RUNTIME_MODIFIABLE,
                         Messages.getString("ConnectionProperties.profileSQL"), "3.1.0", CATEGORY_DEBUGING_PROFILING, 4),
 
@@ -755,8 +788,9 @@ public class PropertyDefinitions {
                 new BooleanPropertyDefinition(PropertyKey.gatherPerfMetrics, DEFAULT_VALUE_FALSE, RUNTIME_MODIFIABLE,
                         Messages.getString("ConnectionProperties.gatherPerfMetrics"), "3.1.2", CATEGORY_DEBUGING_PROFILING, 10),
 
+                // TODO currently is not used !!!
                 new IntegerPropertyDefinition(PropertyKey.reportMetricsIntervalMillis, 30000, RUNTIME_MODIFIABLE,
-                        Messages.getString("ConnectionProperties.reportMetricsIntervalMillis"), "3.1.2", CATEGORY_DEBUGING_PROFILING, 11, 0, Integer.MAX_VALUE), // TODO currently is not used !!!
+                        Messages.getString("ConnectionProperties.reportMetricsIntervalMillis"), "3.1.2", CATEGORY_DEBUGING_PROFILING, 11, 0, Integer.MAX_VALUE),
 
                 new BooleanPropertyDefinition(PropertyKey.logXaCommands, DEFAULT_VALUE_FALSE, RUNTIME_MODIFIABLE,
                         Messages.getString("ConnectionProperties.logXaCommands"), "5.0.5", CATEGORY_DEBUGING_PROFILING, 12),
@@ -876,4 +910,5 @@ public class PropertyDefinitions {
     public static PropertyDefinition<?> getPropertyDefinition(PropertyKey propertyKey) {
         return PROPERTY_KEY_TO_PROPERTY_DEFINITION.get(propertyKey);
     }
+
 }

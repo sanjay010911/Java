@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -96,7 +96,6 @@ public class TranslateExceptions {
     private static boolean verbose = false;
 
     public static void main(String[] args) throws Exception {
-
         System.out.println("Applying TranslateExceptions.");
 
         verbose = "true".equalsIgnoreCase(args[1]);
@@ -109,7 +108,7 @@ public class TranslateExceptions {
         // params classes
         //CtClass ctServerPreparedQueryBindValue = pool.get(ServerPreparedQueryBindValue.class.getName());
         CtClass ctQueryBindings = pool.get(QueryBindings.class.getName());
-        CtClass ctByteArray = pool.get(byte[].class.getName());
+        //CtClass ctByteArray = pool.get(byte[].class.getName());
         CtClass ctColumnDefinition = pool.get(ColumnDefinition.class.getName());
 
         CtClass ctLongArray = pool.get(long[].class.getName());
@@ -193,7 +192,7 @@ public class TranslateExceptions {
         clazz.writeFile(args[0]);
 
         /*
-         * 
+         *
          * java.sql.Connection extends java.sql.Wrapper
          * ----> com.mysql.cj.jdbc.JdbcConnection extends java.sql.Connection, MysqlConnection
          * ----------> com.mysql.cj.jdbc.ConnectionImpl
@@ -292,21 +291,22 @@ public class TranslateExceptions {
         /*
          * java.sql.PreparedStatement extends java.sql.Statement (java.sql.Statement extends java.sql.Wrapper)
          */
-        // com.mysql.cj.jdbc.PreparedStatement extends com.mysql.cj.jdbc.StatementImpl implements java.sql.PreparedStatement
+        // com.mysql.cj.jdbc.ClientPreparedStatement extends com.mysql.cj.jdbc.StatementImpl implements java.sql.PreparedStatement
         clazz = pool.get(ClientPreparedStatement.class.getName());
         instrumentJdbcMethods(clazz, java.sql.PreparedStatement.class, false, EXCEPTION_INTERCEPTOR_GETTER);
         instrumentJdbcMethods(clazz, JdbcStatement.class, true, EXCEPTION_INTERCEPTOR_GETTER);
         // non-JDBC
-        catchRuntimeException(clazz, clazz.getDeclaredMethod("asSql", new CtClass[] { CtClass.booleanType }), EXCEPTION_INTERCEPTOR_GETTER);
+        catchRuntimeException(clazz, clazz.getDeclaredMethod("toString", new CtClass[] {}), EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz, clazz.getDeclaredMethod("checkBounds", new CtClass[] { CtClass.intType, CtClass.intType }), EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz, clazz.getDeclaredMethod("checkReadOnlySafeStatement", new CtClass[] {}), EXCEPTION_INTERCEPTOR_GETTER);
-        catchRuntimeException(clazz, clazz.getDeclaredMethod("executeBatchedInserts", new CtClass[] { CtClass.intType }), EXCEPTION_INTERCEPTOR_GETTER);
-        catchRuntimeException(clazz, clazz.getDeclaredMethod("executeBatchSerially", new CtClass[] { CtClass.intType }), EXCEPTION_INTERCEPTOR_GETTER);
+        catchRuntimeException(clazz, clazz.getDeclaredMethod("executeBatchWithMultiValuesClause", new CtClass[] { CtClass.longType }),
+                EXCEPTION_INTERCEPTOR_GETTER);
+        catchRuntimeException(clazz, clazz.getDeclaredMethod("executeBatchSerially", new CtClass[] { CtClass.longType }), EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz,
                 clazz.getDeclaredMethod("executeInternal",
                         new CtClass[] { CtClass.intType, ctMessageBody, CtClass.booleanType, CtClass.booleanType, ctColumnDefinition, CtClass.booleanType }),
                 EXCEPTION_INTERCEPTOR_GETTER);
-        catchRuntimeException(clazz, clazz.getDeclaredMethod("executePreparedBatchAsMultiStatement", new CtClass[] { CtClass.intType }),
+        catchRuntimeException(clazz, clazz.getDeclaredMethod("executePreparedBatchAsMultiStatement", new CtClass[] { CtClass.longType }),
                 EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz, clazz.getDeclaredMethod("executeUpdateInternal", new CtClass[] { CtClass.booleanType, CtClass.booleanType }),
                 EXCEPTION_INTERCEPTOR_GETTER);
@@ -316,31 +316,31 @@ public class TranslateExceptions {
                 EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz, clazz.getDeclaredMethod("getBytesRepresentation", new CtClass[] { CtClass.intType }), EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz, clazz.getDeclaredMethod("getParameterBindings", new CtClass[] {}), EXCEPTION_INTERCEPTOR_GETTER);
-        catchRuntimeException(clazz, clazz.getDeclaredMethod("initializeFromParseInfo", new CtClass[] {}), EXCEPTION_INTERCEPTOR_GETTER);
+        catchRuntimeException(clazz, clazz.getDeclaredMethod("initializeFromQueryInfo", new CtClass[] {}), EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz, clazz.getDeclaredMethod("isNull", new CtClass[] { CtClass.intType }), EXCEPTION_INTERCEPTOR_GETTER);
-        catchRuntimeException(clazz, clazz.getDeclaredMethod("isSelectQuery", new CtClass[] {}), EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz, clazz.getDeclaredMethod("prepareBatchedInsertSQL", new CtClass[] { ctJdbcConnection, CtClass.intType }),
                 EXCEPTION_INTERCEPTOR_GETTER);
-        catchRuntimeException(clazz,
-                clazz.getDeclaredMethod("setBytes", new CtClass[] { CtClass.intType, ctByteArray, CtClass.booleanType, CtClass.booleanType }),
-                EXCEPTION_INTERCEPTOR_GETTER);
+        //        catchRuntimeException(clazz,
+        //                clazz.getDeclaredMethod("setBytes", new CtClass[] { CtClass.intType, ctByteArray, CtClass.booleanType, CtClass.booleanType }),
+        //                EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz, clazz.getDeclaredMethod("setRetrieveGeneratedKeys", new CtClass[] { CtClass.booleanType }), EXCEPTION_INTERCEPTOR_GETTER);
         clazz.writeFile(args[0]);
 
         /*
-         * com.mysql.cj.jdbc.ServerPreparedStatement extends PreparedStatement
+         * com.mysql.cj.jdbc.ServerPreparedStatement extends ClientPreparedStatement
          */
         clazz = pool.get(ServerPreparedStatement.class.getName());
         instrumentJdbcMethods(clazz, java.sql.PreparedStatement.class, false, EXCEPTION_INTERCEPTOR_GETTER);
         instrumentJdbcMethods(clazz, JdbcStatement.class, true, EXCEPTION_INTERCEPTOR_GETTER);
         // non-JDBC
+        catchRuntimeException(clazz, clazz.getDeclaredMethod("toString", new CtClass[] {}), EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz, clazz.getDeclaredMethod("getBinding", new CtClass[] { CtClass.intType, CtClass.booleanType }),
                 EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz,
                 clazz.getDeclaredMethod("executeInternal",
                         new CtClass[] { CtClass.intType, ctMessageBody, CtClass.booleanType, CtClass.booleanType, ctColumnDefinition, CtClass.booleanType }),
                 EXCEPTION_INTERCEPTOR_GETTER);
-        //catchRuntimeException(clazz, clazz.getDeclaredMethod("canRewriteAsMultiValueInsertAtSqlLevel", new CtClass[] {}), EXCEPTION_INTERCEPTOR_GETTER);
+        //catchRuntimeException(clazz, clazz.getDeclaredMethod("isRewritableWithMultiValueClause", new CtClass[] {}), EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz, clazz.getDeclaredMethod("realClose", new CtClass[] { CtClass.booleanType, CtClass.booleanType }),
                 EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz, clazz.getDeclaredMethod("serverExecute", new CtClass[] { CtClass.intType, CtClass.booleanType, ctColumnDefinition }),
@@ -391,7 +391,7 @@ public class TranslateExceptions {
         catchRuntimeException(clazz, clazz.getDeclaredMethod("doPingInstead", new CtClass[] {}), EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz, clazz.getDeclaredMethod("executeInternal", new CtClass[] { ctString, CtClass.booleanType }), EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz,
-                clazz.getDeclaredMethod("executeBatchUsingMultiQueries", new CtClass[] { CtClass.booleanType, CtClass.intType, CtClass.intType }),
+                clazz.getDeclaredMethod("executeBatchUsingMultiQueries", new CtClass[] { CtClass.booleanType, CtClass.intType, CtClass.longType }),
                 EXCEPTION_INTERCEPTOR_GETTER);
         catchRuntimeException(clazz, clazz.getDeclaredMethod("executeUpdateInternal", new CtClass[] { ctString, CtClass.booleanType, CtClass.booleanType }),
                 EXCEPTION_INTERCEPTOR_GETTER);
@@ -541,7 +541,7 @@ public class TranslateExceptions {
 
         /*
          * These classes have no implementations in c/J:
-         * 
+         *
          * java.sql.Array
          * java.sql.BatchUpdateException
          * java.sql.ClientInfoStatus
@@ -569,7 +569,7 @@ public class TranslateExceptions {
          * java.sql.Time
          * java.sql.Timestamp
          * java.sql.Types
-         * 
+         *
          * javax.sql.CommonDataSource
          * javax.sql.ConnectionEvent
          * javax.sql.ConnectionEventListener
@@ -582,7 +582,7 @@ public class TranslateExceptions {
          * javax.sql.RowSetWriter
          * javax.sql.StatementEvent
          * javax.sql.StatementEventListener
-         * 
+         *
          * javax.sql.rowset.BaseRowSet
          * javax.sql.rowset.CachedRowSet
          * javax.sql.rowset.FilteredRowSet
@@ -595,7 +595,7 @@ public class TranslateExceptions {
          * javax.sql.rowset.RowSetProvider
          * javax.sql.rowset.RowSetWarning
          * javax.sql.rowset.WebRowSet
-         * 
+         *
          * javax.sql.rowset.serial.SerialArray
          * javax.sql.rowset.serial.SerialBlob
          * javax.sql.rowset.serial.SerialClob
@@ -606,7 +606,7 @@ public class TranslateExceptions {
          * javax.sql.rowset.serial.SerialStruct
          * javax.sql.rowset.serial.SQLInputImpl
          * javax.sql.rowset.serial.SQLOutputImpl
-         * 
+         *
          * javax.sql.rowset.spi.SyncFactory
          * javax.sql.rowset.spi.SyncFactoryException
          * javax.sql.rowset.spi.SyncProvider
@@ -624,7 +624,7 @@ public class TranslateExceptions {
 
     /**
      * Instruments methods of cjClazz defined in jdbcClass.
-     * 
+     *
      * @param cjClazz
      *            CtClass to be instrumented.
      * @param jdbcClass
@@ -681,7 +681,6 @@ public class TranslateExceptions {
             }
             sysOutPrintln("");
         }
-
     }
 
     private static void catchRuntimeException(CtClass clazz, CtMethod m, String exceptionInterceptorStr) throws Exception {
@@ -714,7 +713,7 @@ public class TranslateExceptions {
                 return true;
             }
         } else {
-            processed.put(fileName, new LinkedList<CtMethod>());
+            processed.put(fileName, new LinkedList<>());
         }
         return false;
     }

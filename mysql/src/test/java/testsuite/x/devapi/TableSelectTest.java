@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -42,7 +42,6 @@ import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -74,10 +73,9 @@ import com.mysql.cj.xdevapi.Type;
  * @todo
  */
 public class TableSelectTest extends BaseTableTestCase {
+
     @Test
     public void basicQuery() {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists basicQuery");
             sqlUpdate("create table basicQuery (_id varchar(32), name varchar(20), birthday date, age int)");
@@ -116,8 +114,6 @@ public class TableSelectTest extends BaseTableTestCase {
 
     @Test
     public void testComplexQuery() {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists complexQuery");
             sqlUpdate("create table complexQuery (name varchar(32), age int, something int)");
@@ -167,8 +163,6 @@ public class TableSelectTest extends BaseTableTestCase {
 
     @Test
     public void allColumns() {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists allColumns");
             sqlUpdate("create table allColumns (x int, y int, z int)");
@@ -189,8 +183,6 @@ public class TableSelectTest extends BaseTableTestCase {
 
     @Test
     public void countAllColumns() {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists countAllColumns");
             sqlUpdate("create table countAllColumns(x int, y int)");
@@ -208,8 +200,6 @@ public class TableSelectTest extends BaseTableTestCase {
      */
     @Test
     public void testBug22931433() {
-        assumeTrue(this.isSetForXTests);
-
         sqlUpdate("drop table if exists testBug22931433");
         sqlUpdate(
                 "create table testBug22931433(c1 bit(8), c2 bit(16), c3 bit(24), c4 bit(32), c5 bit(40), c6 bit(48), c7 bit(56), c8 bit(64), cb1 bit(1), cb2 bit(64))");
@@ -286,32 +276,24 @@ public class TableSelectTest extends BaseTableTestCase {
         assertEquals(BigDecimal.valueOf(29104508263162465L).toString(), row.getString("c7"));
         assertEquals(BigDecimal.valueOf(7523094288207667809L).toString(), row.getString("c8"));
 
-        assertThrows(DataConversionException.class, "Unsupported conversion from BIT to java.sql.Date", new Callable<Void>() {
-            public Void call() throws Exception {
-                row.getDate("c1");
-                return null;
-            }
+        assertThrows(DataConversionException.class, "Unsupported conversion from BIT to java.sql.Date", () -> {
+            row.getDate("c1");
+            return null;
         });
 
-        assertThrows(DataConversionException.class, "Unsupported conversion from BIT to com.mysql.cj.xdevapi.DbDoc", new Callable<Void>() {
-            public Void call() throws Exception {
-                row.getDbDoc("c1");
-                return null;
-            }
+        assertThrows(DataConversionException.class, "Unsupported conversion from BIT to com.mysql.cj.xdevapi.DbDoc", () -> {
+            row.getDbDoc("c1");
+            return null;
         });
 
-        assertThrows(DataConversionException.class, "Unsupported conversion from BIT to java.sql.Time", new Callable<Void>() {
-            public Void call() throws Exception {
-                row.getTime("c1");
-                return null;
-            }
+        assertThrows(DataConversionException.class, "Unsupported conversion from BIT to java.sql.Time", () -> {
+            row.getTime("c1");
+            return null;
         });
 
-        assertThrows(DataConversionException.class, "Unsupported conversion from BIT to java.sql.Timestamp", new Callable<Void>() {
-            public Void call() throws Exception {
-                row.getTimestamp("c1");
-                return null;
-            }
+        assertThrows(DataConversionException.class, "Unsupported conversion from BIT to java.sql.Timestamp", () -> {
+            row.getTimestamp("c1");
+            return null;
         });
 
         // test negative values
@@ -367,12 +349,11 @@ public class TableSelectTest extends BaseTableTestCase {
         assertEquals(false, row2.getBoolean("cb2"));
 
         sqlUpdate("drop table if exists testBug22931433");
+        s1.close();
     }
 
     @Test
     public void basicViewQuery() {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists basicTable1");
             sqlUpdate("drop table if exists basicTable2");
@@ -414,8 +395,6 @@ public class TableSelectTest extends BaseTableTestCase {
 
     @Test
     public void testOrderBy() {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists testOrderBy");
             sqlUpdate("create table testOrderBy (_id int, x int, y int)");
@@ -443,8 +422,6 @@ public class TableSelectTest extends BaseTableTestCase {
 
     @Test
     public void testBug22988922() {
-        assumeTrue(this.isSetForXTests);
-
         sqlUpdate("drop table if exists testBug22988922");
         sqlUpdate("create table testBug22988922 (g point,l longblob,t longtext)");
 
@@ -464,8 +441,6 @@ public class TableSelectTest extends BaseTableTestCase {
      */
     @Test
     public void testBug22931277() {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists testBug22931277");
             sqlUpdate("create table testBug22931277 (j year,k datetime(3))");
@@ -492,7 +467,7 @@ public class TableSelectTest extends BaseTableTestCase {
 
     @Test
     public void testTableRowLocks() throws Exception {
-        assumeTrue(this.isSetForXTests && mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.3")));
+        assumeTrue(mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.3")), "MySQL 8.0.3+ is required to run this test.");
 
         sqlUpdate("drop table if exists testTableRowLocks");
         sqlUpdate("create table testTableRowLocks (_id varchar(32), a varchar(20))");
@@ -531,11 +506,9 @@ public class TableSelectTest extends BaseTableTestCase {
             session2.startTransaction();
             table2.select("_id").where("_id = '2'").lockShared().execute(); // should return immediately
             CompletableFuture<RowResult> res2 = table2.select("_id").where("_id = '1'").lockShared().executeAsync(); // session2 blocks
-            assertThrows(TimeoutException.class, new Callable<Void>() {
-                public Void call() throws Exception {
-                    res2.get(5, TimeUnit.SECONDS);
-                    return null;
-                }
+            assertThrows(TimeoutException.class, () -> {
+                res2.get(5, TimeUnit.SECONDS);
+                return null;
             });
 
             session1.rollback(); // session2 should unblock now
@@ -552,11 +525,9 @@ public class TableSelectTest extends BaseTableTestCase {
             table2.select("_id").where("_id = '2'").lockExclusive().execute(); // should return immediately
             table2.select("_id").where("_id = '3'").lockShared().execute(); // should return immediately
             CompletableFuture<RowResult> res3 = table2.select("_id").where("_id = '1'").lockExclusive().executeAsync(); // session2 blocks
-            assertThrows(TimeoutException.class, new Callable<Void>() {
-                public Void call() throws Exception {
-                    res3.get(5, TimeUnit.SECONDS);
-                    return null;
-                }
+            assertThrows(TimeoutException.class, () -> {
+                res3.get(5, TimeUnit.SECONDS);
+                return null;
             });
 
             session1.rollback(); // session2 should unblock now
@@ -571,11 +542,9 @@ public class TableSelectTest extends BaseTableTestCase {
             session2.startTransaction();
             table2.select("_id").where("_id = '2'").lockExclusive().execute(); // should return immediately
             CompletableFuture<RowResult> res4 = table2.select("_id").where("_id = '1'").lockExclusive().executeAsync(); // session2 blocks
-            assertThrows(TimeoutException.class, new Callable<Void>() {
-                public Void call() throws Exception {
-                    res4.get(5, TimeUnit.SECONDS);
-                    return null;
-                }
+            assertThrows(TimeoutException.class, () -> {
+                res4.get(5, TimeUnit.SECONDS);
+                return null;
             });
 
             session1.rollback(); // session2 should unblock now
@@ -596,7 +565,7 @@ public class TableSelectTest extends BaseTableTestCase {
 
     @Test
     public void testTableRowLockOptions() throws Exception {
-        assumeTrue(this.isSetForXTests && mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.5")));
+        assumeTrue(mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.5")), "MySQL 8.0.5+ is required to run this test.");
 
         Function<RowResult, List<String>> asStringList = rr -> rr.fetchAll().stream().map(r -> r.getString(0)).collect(Collectors.toList());
 
@@ -888,13 +857,11 @@ public class TableSelectTest extends BaseTableTestCase {
     /**
      * Tests fix for Bug#22038729, X DEVAPI: ANY API CALL AFTER A FAILED CALL PROC() RESULTS IN HANG
      * and for duplicate Bug#25575010, X DEVAPI: ANY API CALL AFTER A FAILED SELECT RESULTS IN HANG
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug22038729() throws Exception {
-        assumeTrue(this.isSetForXTests);
-
         final Field pf = CoreSession.class.getDeclaredField("protocol");
         pf.setAccessible(true);
 
@@ -957,7 +924,7 @@ public class TableSelectTest extends BaseTableTestCase {
 
     @Test
     public void testPreparedStatements() {
-        assumeTrue(this.isSetForXTests && mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.14")));
+        assumeTrue(mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.14")), "MySQL 8.0.14+ is required to run this test.");
 
         try {
             // Prepare test data.
@@ -1172,4 +1139,48 @@ public class TableSelectTest extends BaseTableTestCase {
         }
         assertEquals(expectedMax, expectedMin - 1);
     }
+
+    /**
+     * Tests server Bug#31667405, INCORRECT PREPARED STATEMENT OUTCOME WITH NUMERIC STRINGS IN JSON.
+     */
+    @Test
+    public void testBug31667405() {
+        assumeTrue(mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.14")), "MySQL 8.0.14+ is required to run this test.");
+
+        try {
+            // Prepare test data.
+            sqlUpdate("DROP TABLE IF EXISTS testBug31667405");
+            sqlUpdate("CREATE TABLE testBug31667405 (doc JSON)");
+            sqlUpdate("INSERT INTO testBug31667405 VALUES ('{\"ord\":\"1\"}')");
+
+            SessionFactory sf = new SessionFactory();
+            Session testSession = sf.getSession(this.testProperties);
+
+            int sessionThreadId = getThreadId(testSession);
+            assertPreparedStatementsCount(sessionThreadId, 0, 1);
+            assertPreparedStatementsStatusCounts(testSession, 0, 0, 0);
+
+            Table testTbl = testSession.getDefaultSchema().getTable("testBug31667405");
+
+            // Initialize SelectStatement object.
+            SelectStatement testSelect2 = testTbl.select().where("$.ord == :n");
+            assertPreparedStatementsCountsAndId(testSession, 0, testSelect2, 0, -1);
+            assertPreparedStatementsStatusCounts(testSession, 0, 0, 0);
+
+            // A. Set binds: 1st execute -> non-prepared.
+            testSelect2.bind("n", "1").execute();
+            assertPreparedStatementsCountsAndId(testSession, 0, testSelect2, 0, -1);
+            assertPreparedStatementsStatusCounts(testSession, 0, 0, 0);
+
+            // B. Set binds reuse statement: 2nd execute -> prepare + execute.
+            RowResult res = testSelect2.bind("n", "1").execute();
+            assertEquals(1, res.count());
+
+            assertPreparedStatementsCountsAndId(testSession, 1, testSelect2, 1, 1);
+            assertPreparedStatementsStatusCounts(testSession, 1, 1, 0);
+        } finally {
+            sqlUpdate("DROP TABLE IF EXISTS testBug31667405");
+        }
+    }
+
 }

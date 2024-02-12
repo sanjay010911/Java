@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -46,6 +46,7 @@ import com.mysql.cj.jdbc.JdbcConnection;
 import testsuite.BaseTestCase;
 
 public class ReadOnlyCallableStatementTest extends BaseTestCase {
+
     @Test
     public void testReadOnlyWithProcBodyAccess() throws Exception {
         Connection replConn = null;
@@ -57,7 +58,10 @@ public class ReadOnlyCallableStatementTest extends BaseTestCase {
 
             createProcedure("`testProc.1`", "()\nREADS SQL DATA\nbegin\nSELECT NOW();\nend\n");
 
-            replConn = getSourceReplicaReplicationConnection();
+            Properties props2 = new Properties();
+            props2.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+            props2.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            replConn = getSourceReplicaReplicationConnection(props2);
             replConn.setReadOnly(true);
 
             CallableStatement cstmt = replConn.prepareCall("CALL testProc1()");
@@ -93,7 +97,10 @@ public class ReadOnlyCallableStatementTest extends BaseTestCase {
 
             createProcedure("`testProc.2`", "()\nMODIFIES SQL DATA\nbegin\nSELECT NOW();\nend\n");
 
-            replConn = getSourceReplicaReplicationConnection();
+            Properties props2 = new Properties();
+            props2.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+            props2.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            replConn = getSourceReplicaReplicationConnection(props2);
             replConn.setReadOnly(true);
 
             CallableStatement cstmt = replConn.prepareCall("CALL testProc2()");

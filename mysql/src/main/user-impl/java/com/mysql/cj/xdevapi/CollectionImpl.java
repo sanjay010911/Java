@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -43,6 +43,7 @@ import com.mysql.cj.protocol.x.XMessageBuilder;
 import com.mysql.cj.protocol.x.XProtocolError;
 
 public class CollectionImpl implements Collection {
+
     private MysqlxSession mysqlxSession;
     private XMessageBuilder xbuilder;
     private SchemaImpl schema;
@@ -55,26 +56,31 @@ public class CollectionImpl implements Collection {
         this.xbuilder = (XMessageBuilder) this.mysqlxSession.<XMessage>getMessageBuilder();
     }
 
+    @Override
     public Session getSession() {
         return this.schema.getSession();
     }
 
+    @Override
     public Schema getSchema() {
         return this.schema;
     }
 
+    @Override
     public String getName() {
         return this.name;
     }
 
+    @Override
     public DbObjectStatus existsInDatabase() {
         if (this.mysqlxSession.getDataStoreMetadata().tableExists(this.schema.getName(), this.name)) {
-            // TODO should also check that the table has a DbObjectType.COLLECTION type  
+            // TODO should also check that the table has a DbObjectType.COLLECTION type
             return DbObjectStatus.EXISTS;
         }
         return DbObjectStatus.NOT_EXISTS;
     }
 
+    @Override
     public AddStatement add(Map<String, ?> doc) {
         throw new FeatureNotAvailableException("TODO: ");
     }
@@ -97,22 +103,27 @@ public class CollectionImpl implements Collection {
         return new AddStatementImpl(this.mysqlxSession, this.schema.getName(), this.name, doc);
     }
 
+    @Override
     public AddStatement add(DbDoc... docs) {
         return new AddStatementImpl(this.mysqlxSession, this.schema.getName(), this.name, docs);
     }
 
+    @Override
     public FindStatement find() {
         return find(null);
     }
 
+    @Override
     public FindStatement find(String searchCondition) {
         return new FindStatementImpl(this.mysqlxSession, this.schema.getName(), this.name, searchCondition);
     }
 
+    @Override
     public ModifyStatement modify(String searchCondition) {
         return new ModifyStatementImpl(this.mysqlxSession, this.schema.getName(), this.name, searchCondition);
     }
 
+    @Override
     public RemoveStatement remove(String searchCondition) {
         return new RemoveStatementImpl(this.mysqlxSession, this.schema.getName(), this.name, searchCondition);
     }
@@ -131,6 +142,7 @@ public class CollectionImpl implements Collection {
                 new UpdateResultBuilder<>());
     }
 
+    @Override
     public void dropIndex(String indexName) {
         try {
             this.mysqlxSession.query(this.xbuilder.buildDropCollectionIndex(this.schema.getName(), this.name, indexName), new UpdateResultBuilder<>());
@@ -143,6 +155,7 @@ public class CollectionImpl implements Collection {
         }
     }
 
+    @Override
     public long count() {
         try {
             return this.mysqlxSession.getDataStoreMetadata().getTableRowCount(this.schema.getName(), this.name);
@@ -154,6 +167,7 @@ public class CollectionImpl implements Collection {
         }
     }
 
+    @Override
     public DbDoc newDoc() {
         return new DbDocImpl();
     }
@@ -188,6 +202,10 @@ public class CollectionImpl implements Collection {
         if (doc == null) {
             throw new XDevAPIError(Messages.getString("CreateTableStatement.0", new String[] { "doc" }));
         }
+        JsonValue docId = doc.get("_id");
+        if (docId != null && (!JsonString.class.isInstance(docId) || !id.equals(((JsonString) docId).getString()))) {
+            throw new XDevAPIError(Messages.getString("Collection.DocIdMismatch"));
+        }
         return modify("_id = :id").set("$", doc).bind("id", id).execute();
     }
 
@@ -214,10 +232,11 @@ public class CollectionImpl implements Collection {
         if (doc == null) {
             throw new XDevAPIError(Messages.getString("CreateTableStatement.0", new String[] { "doc" }));
         }
-        if (doc.get("_id") == null) {
+        JsonValue docId = doc.get("_id");
+        if (docId == null) {
             doc.add("_id", new JsonString().setValue(id));
-        } else if (!id.equals(((JsonString) doc.get("_id")).getString())) {
-            throw new XDevAPIError("Document already has an _id that doesn't match to id parameter");
+        } else if (!JsonString.class.isInstance(docId) || !id.equals(((JsonString) docId).getString())) {
+            throw new XDevAPIError(Messages.getString("Collection.DocIdMismatch"));
         }
         return add(doc).setUpsert(true).execute();
     }
@@ -246,4 +265,5 @@ public class CollectionImpl implements Collection {
     public Result removeOne(String id) {
         return remove("_id = :id").bind("id", id).execute();
     }
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -71,11 +71,12 @@ import testsuite.BaseTestCase;
 import testsuite.MockJndiContextFactory;
 
 public class DataSourceTest extends BaseTestCase {
+
     private Context ctx;
 
     /**
      * Sets up this test, binding a DataSource into JNDI, using a mock in-memory JNDI provider.
-     * 
+     *
      * @throws Exception
      */
     @BeforeEach
@@ -96,7 +97,7 @@ public class DataSourceTest extends BaseTestCase {
 
     /**
      * Un-binds the DataSource and closes the context
-     * 
+     *
      * @throws Exception
      */
     @AfterEach
@@ -107,7 +108,7 @@ public class DataSourceTest extends BaseTestCase {
 
     /**
      * Tests that we can get a connection from the DataSource bound in JNDI during test setup
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -130,6 +131,11 @@ public class DataSourceTest extends BaseTestCase {
 
         assertNotNull(boundDs, "Datasource not bound");
 
+        if (boundDs instanceof MysqlDataSource) {
+            ((MysqlDataSource) boundDs).getStringProperty(PropertyKey.sslMode.getKeyName()).setValue("DISABLED");
+            ((MysqlDataSource) boundDs).getBooleanProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName()).setValue(true);
+        }
+
         Connection con = boundDs.getConnection();
         assertNotNull(con, "Connection can not be obtained from data source");
         con.close();
@@ -137,47 +143,44 @@ public class DataSourceTest extends BaseTestCase {
 
     /**
      * Tests whether Connection.changeUser() (and thus pooled connections) restore character set information correctly.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testChangeUserAndCharsets() throws Exception {
         MysqlConnectionPoolDataSource ds = new MysqlConnectionPoolDataSource();
         ds.setURL(BaseTestCase.dbUrl);
+        ds.getStringProperty(PropertyKey.sslMode.getKeyName()).setValue("DISABLED");
+        ds.getBooleanProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName()).setValue(true);
         ds.getProperty(PropertyKey.characterEncoding).setValue("utf-8");
         PooledConnection pooledConnection = ds.getPooledConnection();
 
         Connection connToMySQL = pooledConnection.getConnection();
         this.rs = connToMySQL.createStatement().executeQuery("SELECT @@character_set_results");
         assertTrue(this.rs.next());
-
         assertNull(this.rs.getString(1));
 
         this.rs = connToMySQL.createStatement().executeQuery("SHOW SESSION VARIABLES LIKE 'character_set_client'");
         assertTrue(this.rs.next());
-
-        // Because of utf8mb4
-        assertTrue(this.rs.getString(2).startsWith("utf8"));
+        assertTrue(this.rs.getString(2).startsWith("utf8")); // Because of utf8mb4.
 
         connToMySQL.close();
 
         connToMySQL = pooledConnection.getConnection();
         this.rs = connToMySQL.createStatement().executeQuery("SELECT @@character_set_results");
         assertTrue(this.rs.next());
-        assertEquals(null, this.rs.getString(1));
+        assertNull(this.rs.getString(1));
 
         this.rs = connToMySQL.createStatement().executeQuery("SHOW SESSION VARIABLES LIKE 'character_set_client'");
         assertTrue(this.rs.next());
-
-        // Because of utf8mb4
-        assertTrue(this.rs.getString(2).startsWith("utf8"));
+        assertTrue(this.rs.getString(2).startsWith("utf8")); // Because of utf8mb4.
 
         pooledConnection.getConnection().close();
     }
 
     /**
      * Tests whether XADataSources can be bound into JNDI
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -300,4 +303,17 @@ public class DataSourceTest extends BaseTestCase {
             }
         }
     }
+
+    @Test
+    public void testUrlEscaping() {
+        MysqlDataSource testDataSource = new MysqlDataSource();
+        testDataSource.setServerName("connectorj.mysql.com");
+        testDataSource.setDatabaseName("mysql?connector/j");
+        assertEquals("jdbc:mysql://connectorj.mysql.com:3306/mysql%3Fconnector%2Fj", testDataSource.getUrl());
+
+        testDataSource.setServerName("connectorj.mysql.com:12345/fakeDB?foo=");
+        testDataSource.setDatabaseName("goodDB");
+        assertEquals("jdbc:mysql://connectorj.mysql.com%3A12345%2FfakeDB%3Ffoo%3D:3306/goodDB", testDataSource.getUrl());
+    }
+
 }

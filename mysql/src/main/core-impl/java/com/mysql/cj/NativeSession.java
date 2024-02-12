@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -36,6 +36,7 @@ import java.lang.ref.WeakReference;
 import java.net.SocketAddress;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -77,6 +78,7 @@ import com.mysql.cj.result.Row;
 import com.mysql.cj.result.StringValueFactory;
 import com.mysql.cj.result.ValueFactory;
 import com.mysql.cj.util.StringUtils;
+import com.mysql.cj.util.Util;
 
 public class NativeSession extends CoreSession implements Serializable {
 
@@ -108,7 +110,6 @@ public class NativeSession extends CoreSession implements Serializable {
 
     public void connect(HostInfo hi, String user, String password, String database, int loginTimeout, TransactionEventHandler transactionManager)
             throws IOException {
-
         this.hostInfo = hi;
 
         // reset max-rows to default value
@@ -187,12 +188,14 @@ public class NativeSession extends CoreSession implements Serializable {
     }
 
     public void enableMultiQueries() {
-        sendCommand(this.commandBuilder.buildComSetOption(((NativeProtocol) this.protocol).getSharedSendPacket(), 0), false, 0);
+        this.protocol.sendCommand(this.commandBuilder.buildComSetOption(((NativeProtocol) this.protocol).getSharedSendPacket(), 0), false, 0);
+        // OK_PACKET returned in previous sendCommand() was not processed so keep original transaction state.
         ((NativeServerSession) getServerSession()).preserveOldTransactionState();
     }
 
     public void disableMultiQueries() {
-        sendCommand(this.commandBuilder.buildComSetOption(((NativeProtocol) this.protocol).getSharedSendPacket(), 1), false, 0);
+        this.protocol.sendCommand(this.commandBuilder.buildComSetOption(((NativeProtocol) this.protocol).getSharedSendPacket(), 1), false, 0);
+        // OK_PACKET returned in previous sendCommand() was not processed so keep original transaction state.
         ((NativeServerSession) getServerSession()).preserveOldTransactionState();
     }
 
@@ -224,13 +227,13 @@ public class NativeSession extends CoreSession implements Serializable {
 
     /**
      * Used by MiniAdmin to shutdown a MySQL server
-     * 
+     *
      */
     public void shutdownServer() {
         if (versionMeetsMinimum(5, 7, 9)) {
-            sendCommand(this.commandBuilder.buildComQuery(getSharedSendPacket(), "SHUTDOWN"), false, 0);
+            this.protocol.sendCommand(this.commandBuilder.buildComQuery(getSharedSendPacket(), "SHUTDOWN"), false, 0);
         } else {
-            sendCommand(this.commandBuilder.buildComShutdown(getSharedSendPacket()), false, 0);
+            this.protocol.sendCommand(this.commandBuilder.buildComShutdown(getSharedSendPacket()), false, 0);
         }
     }
 
@@ -247,7 +250,7 @@ public class NativeSession extends CoreSession implements Serializable {
     /**
      * Returns the packet used for sending data (used by PreparedStatement) with position set to 0.
      * Guarded by external synchronization on a mutex.
-     * 
+     *
      * @return A packet to send data with
      */
     public NativePacketPayload getSharedSendPacket() {
@@ -272,10 +275,6 @@ public class NativeSession extends CoreSession implements Serializable {
 
     public long getCurrentTimeNanosOrMillis() {
         return ((NativeProtocol) this.protocol).getCurrentTimeNanosOrMillis();
-    }
-
-    public final NativePacketPayload sendCommand(NativePacketPayload queryPacket, boolean skipCheck, int timeoutMillis) {
-        return (NativePacketPayload) this.protocol.sendCommand(queryPacket, skipCheck, timeoutMillis);
     }
 
     public long getSlowQueryThreshold() {
@@ -326,48 +325,40 @@ public class NativeSession extends CoreSession implements Serializable {
                 return;
             }
 
-            try {
-                Class<?> factoryClass;
+            String serverConfigCacheFactory = this.propertySet.getStringProperty(PropertyKey.serverConfigCacheFactory).getStringValue();
 
-                factoryClass = Class.forName(getPropertySet().getStringProperty(PropertyKey.serverConfigCacheFactory).getStringValue());
+            @SuppressWarnings("unchecked")
+            CacheAdapterFactory<String, Map<String, String>> cacheFactory = Util.getInstance(CacheAdapterFactory.class, serverConfigCacheFactory, null, null,
+                    getExceptionInterceptor());
+            this.serverConfigCache = cacheFactory.getInstance(syncMutex, this.hostInfo.getDatabaseUrl(), Integer.MAX_VALUE, Integer.MAX_VALUE);
 
-                @SuppressWarnings("unchecked")
-                CacheAdapterFactory<String, Map<String, String>> cacheFactory = ((CacheAdapterFactory<String, Map<String, String>>) factoryClass.newInstance());
+            ExceptionInterceptor evictOnCommsError = new ExceptionInterceptor() {
 
-                this.serverConfigCache = cacheFactory.getInstance(syncMutex, this.hostInfo.getDatabaseUrl(), Integer.MAX_VALUE, Integer.MAX_VALUE);
-
-                ExceptionInterceptor evictOnCommsError = new ExceptionInterceptor() {
-
-                    public ExceptionInterceptor init(Properties config, Log log1) {
-                        return this;
-                    }
-
-                    public void destroy() {
-                    }
-
-                    @SuppressWarnings("synthetic-access")
-                    public Exception interceptException(Exception sqlEx) {
-                        if (sqlEx instanceof SQLException && ((SQLException) sqlEx).getSQLState() != null
-                                && ((SQLException) sqlEx).getSQLState().startsWith("08")) {
-                            NativeSession.this.serverConfigCache.invalidate(NativeSession.this.hostInfo.getDatabaseUrl());
-                        }
-                        return null;
-                    }
-                };
-
-                if (this.exceptionInterceptor == null) {
-                    this.exceptionInterceptor = evictOnCommsError;
-                } else {
-                    ((ExceptionInterceptorChain) this.exceptionInterceptor).addRingZero(evictOnCommsError);
+                @Override
+                public ExceptionInterceptor init(Properties config, Log log1) {
+                    return this;
                 }
-            } catch (ClassNotFoundException e) {
-                throw ExceptionFactory.createException(Messages.getString("Connection.CantFindCacheFactory",
-                        new Object[] { getPropertySet().getStringProperty(PropertyKey.parseInfoCacheFactory).getValue(), PropertyKey.parseInfoCacheFactory }),
-                        e, getExceptionInterceptor());
-            } catch (InstantiationException | IllegalAccessException | CJException e) {
-                throw ExceptionFactory.createException(Messages.getString("Connection.CantLoadCacheFactory",
-                        new Object[] { getPropertySet().getStringProperty(PropertyKey.parseInfoCacheFactory).getValue(), PropertyKey.parseInfoCacheFactory }),
-                        e, getExceptionInterceptor());
+
+                @Override
+                public void destroy() {
+                }
+
+                @Override
+                @SuppressWarnings("synthetic-access")
+                public Exception interceptException(Exception sqlEx) {
+                    if (sqlEx instanceof SQLException && ((SQLException) sqlEx).getSQLState() != null
+                            && ((SQLException) sqlEx).getSQLState().startsWith("08")) {
+                        NativeSession.this.serverConfigCache.invalidate(NativeSession.this.hostInfo.getDatabaseUrl());
+                    }
+                    return null;
+                }
+
+            };
+
+            if (this.exceptionInterceptor == null) {
+                this.exceptionInterceptor = evictOnCommsError;
+            } else {
+                ((ExceptionInterceptorChain) this.exceptionInterceptor).addRingZero(evictOnCommsError);
             }
         }
     }
@@ -378,14 +369,13 @@ public class NativeSession extends CoreSession implements Serializable {
     /**
      * Loads the result of 'SHOW VARIABLES' into the serverVariables field so
      * that the driver can configure itself.
-     * 
+     *
      * @param syncMutex
      *            synchronization mutex
      * @param version
      *            driver version string
      */
     public void loadServerVariables(Object syncMutex, String version) {
-
         if (this.cacheServerConfiguration.getValue()) {
             createConfigCacheIfNeeded(syncMutex);
 
@@ -396,8 +386,11 @@ public class NativeSession extends CoreSession implements Serializable {
 
                 if (cachedServerVersion != null && getServerSession().getServerVersion() != null
                         && cachedServerVersion.equals(getServerSession().getServerVersion().toString())) {
-                    this.protocol.getServerSession().setServerVariables(cachedVariableMap);
-
+                    Map<String, String> localVariableMap = this.protocol.getServerSession().getServerVariables();
+                    Map<String, String> newLocalVariableMap = new HashMap<>();
+                    newLocalVariableMap.putAll(cachedVariableMap);
+                    newLocalVariableMap.putAll(localVariableMap); // preserving variables already configured on previous session initialization steps
+                    this.protocol.getServerSession().setServerVariables(newLocalVariableMap);
                     return;
                 }
 
@@ -415,9 +408,9 @@ public class NativeSession extends CoreSession implements Serializable {
                 version = buf.toString();
             }
 
-            String versionComment = (this.propertySet.getBooleanProperty(PropertyKey.paranoid).getValue() || version == null) ? "" : "/* " + version + " */";
+            String versionComment = this.propertySet.getBooleanProperty(PropertyKey.paranoid).getValue() || version == null ? "" : "/* " + version + " */";
 
-            this.protocol.getServerSession().setServerVariables(new HashMap<String, String>());
+            this.protocol.getServerSession().setServerVariables(new HashMap<>());
 
             if (versionMeetsMinimum(5, 1, 0)) {
                 StringBuilder queryBuf = new StringBuilder(versionComment).append("SELECT");
@@ -445,14 +438,15 @@ public class NativeSession extends CoreSession implements Serializable {
                 queryBuf.append(", @@sql_mode AS sql_mode");
                 queryBuf.append(", @@system_time_zone AS system_time_zone");
                 queryBuf.append(", @@time_zone AS time_zone");
-                if (versionMeetsMinimum(8, 0, 3) || (versionMeetsMinimum(5, 7, 20) && !versionMeetsMinimum(8, 0, 0))) {
+                if (versionMeetsMinimum(8, 0, 3) || versionMeetsMinimum(5, 7, 20) && !versionMeetsMinimum(8, 0, 0)) {
                     queryBuf.append(", @@transaction_isolation AS transaction_isolation");
                 } else {
                     queryBuf.append(", @@tx_isolation AS transaction_isolation");
                 }
                 queryBuf.append(", @@wait_timeout AS wait_timeout");
 
-                NativePacketPayload resultPacket = sendCommand(this.commandBuilder.buildComQuery(null, queryBuf.toString()), false, 0);
+                NativePacketPayload resultPacket = (NativePacketPayload) this.protocol.sendCommand(this.commandBuilder.buildComQuery(null, queryBuf.toString()),
+                        false, 0);
                 Resultset rs = ((NativeProtocol) this.protocol).readAllResults(-1, false, resultPacket, false, null,
                         new ResultsetFactory(Type.FORWARD_ONLY, null));
                 Field[] f = rs.getColumnDefinition().getFields();
@@ -462,14 +456,14 @@ public class NativeSession extends CoreSession implements Serializable {
                     if ((r = rs.getRows().next()) != null) {
                         for (int i = 0; i < f.length; i++) {
                             String value = r.getValue(i, vf);
-                            this.protocol.getServerSession().getServerVariables().put(f[i].getColumnLabel(),
-                                    "utf8mb3".equalsIgnoreCase(value) ? "utf8" : value); // recent server versions return "utf8mb3" instead of "utf8"
+                            this.protocol.getServerSession().getServerVariables().put(f[i].getColumnLabel(), value);
                         }
                     }
                 }
 
             } else {
-                NativePacketPayload resultPacket = sendCommand(this.commandBuilder.buildComQuery(null, versionComment + "SHOW VARIABLES"), false, 0);
+                NativePacketPayload resultPacket = (NativePacketPayload) this.protocol
+                        .sendCommand(this.commandBuilder.buildComQuery(null, versionComment + "SHOW VARIABLES"), false, 0);
                 Resultset rs = ((NativeProtocol) this.protocol).readAllResults(-1, false, resultPacket, false, null,
                         new ResultsetFactory(Type.FORWARD_ONLY, null));
                 ValueFactory<String> vf = new StringValueFactory(this.propertySet);
@@ -484,7 +478,9 @@ public class NativeSession extends CoreSession implements Serializable {
 
         if (this.cacheServerConfiguration.getValue()) {
             this.protocol.getServerSession().getServerVariables().put(SERVER_VERSION_STRING_VAR_NAME, getServerSession().getServerVersion().toString());
-            this.serverConfigCache.put(this.hostInfo.getDatabaseUrl(), this.protocol.getServerSession().getServerVariables());
+            Map<String, String> localVariableMap = new HashMap<>();
+            localVariableMap.putAll(this.protocol.getServerSession().getServerVariables());
+            this.serverConfigCache.put(this.hostInfo.getDatabaseUrl(), Collections.unmodifiableMap(localVariableMap));
         }
     }
 
@@ -509,11 +505,12 @@ public class NativeSession extends CoreSession implements Serializable {
                         separator = ",";
                     }
                 }
-                sendCommand(this.commandBuilder.buildComQuery(null, query.toString()), false, 0);
+                this.protocol.sendCommand(this.commandBuilder.buildComQuery(null, query.toString()), false, 0);
             }
         }
     }
 
+    @Override
     public String getProcessHost() {
         try {
             long threadId = getThreadId();
@@ -524,7 +521,8 @@ public class NativeSession extends CoreSession implements Serializable {
                 this.log.logWarn(String.format(
                         "Connection id %d not found in \"SHOW PROCESSLIST\", assuming 32-bit overflow, using SELECT CONNECTION_ID() instead", threadId));
 
-                NativePacketPayload resultPacket = sendCommand(this.commandBuilder.buildComQuery(null, "SELECT CONNECTION_ID()"), false, 0);
+                NativePacketPayload resultPacket = (NativePacketPayload) this.protocol
+                        .sendCommand(this.commandBuilder.buildComQuery(null, "SELECT CONNECTION_ID()"), false, 0);
                 Resultset rs = ((NativeProtocol) this.protocol).readAllResults(-1, false, resultPacket, false, null,
                         new ResultsetFactory(Type.FORWARD_ONLY, null));
 
@@ -556,11 +554,11 @@ public class NativeSession extends CoreSession implements Serializable {
 
             NativePacketPayload resultPacket = versionMeetsMinimum(5, 6, 0) // performance_schema.threads in MySQL 5.5 does not contain PROCESSLIST_HOST column
                     && ps != null && ("1".contentEquals(ps) || "ON".contentEquals(ps))
-                            ? sendCommand(this.commandBuilder.buildComQuery(null,
+                            ? (NativePacketPayload) this.protocol.sendCommand(this.commandBuilder.buildComQuery(null,
                                     "select PROCESSLIST_ID, PROCESSLIST_USER, PROCESSLIST_HOST from performance_schema.threads where PROCESSLIST_ID="
                                             + threadId),
                                     false, 0)
-                            : sendCommand(this.commandBuilder.buildComQuery(null, "SHOW PROCESSLIST"), false, 0);
+                            : (NativePacketPayload) this.protocol.sendCommand(this.commandBuilder.buildComQuery(null, "SHOW PROCESSLIST"), false, 0);
 
             Resultset rs = ((NativeProtocol) this.protocol).readAllResults(-1, false, resultPacket, false, null, new ResultsetFactory(Type.FORWARD_ONLY, null));
 
@@ -584,7 +582,7 @@ public class NativeSession extends CoreSession implements Serializable {
 
     /**
      * Get the variable value from server.
-     * 
+     *
      * @param varName
      *            server variable name
      * @return server variable value
@@ -592,7 +590,8 @@ public class NativeSession extends CoreSession implements Serializable {
     public String queryServerVariable(String varName) {
         try {
 
-            NativePacketPayload resultPacket = sendCommand(this.commandBuilder.buildComQuery(null, "SELECT " + varName), false, 0);
+            NativePacketPayload resultPacket = (NativePacketPayload) this.protocol.sendCommand(this.commandBuilder.buildComQuery(null, "SELECT " + varName),
+                    false, 0);
             Resultset rs = ((NativeProtocol) this.protocol).readAllResults(-1, false, resultPacket, false, null, new ResultsetFactory(Type.FORWARD_ONLY, null));
 
             ValueFactory<String> svf = new StringValueFactory(this.propertySet);
@@ -615,7 +614,7 @@ public class NativeSession extends CoreSession implements Serializable {
      * Send a query to the server. Returns one of the ResultSet objects.
      * To ensure that Statement's queries are serialized, calls to this method
      * should be enclosed in a connection mutex synchronized block.
-     * 
+     *
      * @param <T>
      *            extends {@link Resultset}
      * @param callingQuery
@@ -634,12 +633,11 @@ public class NativeSession extends CoreSession implements Serializable {
      *            use this metadata instead of the one provided on wire
      * @param isBatch
      *            is it a batch query
-     * 
+     *
      * @return a ResultSet holding the results
      */
     public <T extends Resultset> T execSQL(Query callingQuery, String query, int maxRows, NativePacketPayload packet, boolean streamResults,
             ProtocolEntityFactory<T, NativePacketPayload> resultSetFactory, ColumnDefinition cachedMetadata, boolean isBatch) {
-
         long queryStartTime = this.gatherPerfMetrics.getValue() ? System.currentTimeMillis() : 0;
         int endOfQueryPacketPosition = packet != null ? packet.getPosition() : 0;
 
@@ -672,7 +670,7 @@ public class NativeSession extends CoreSession implements Serializable {
                 sqlE.appendMessage(messageBuf.toString());
             }
 
-            if ((this.autoReconnect.getValue())) {
+            if (this.autoReconnect.getValue()) {
                 if (sqlE instanceof CJCommunicationsException) {
                     // IO may be dirty or damaged beyond repair, force close it.
                     this.protocol.getSocketConnection().forceClose();
@@ -704,7 +702,6 @@ public class NativeSession extends CoreSession implements Serializable {
                 ((NativeProtocol) this.protocol).getMetricsHolder().registerQueryExecutionTime(System.currentTimeMillis() - queryStartTime);
             }
         }
-
     }
 
     public long getIdleFor() {
@@ -727,15 +724,15 @@ public class NativeSession extends CoreSession implements Serializable {
         long pingMillisLifetime = getPropertySet().getIntegerProperty(PropertyKey.selfDestructOnPingSecondsLifetime).getValue();
         int pingMaxOperations = getPropertySet().getIntegerProperty(PropertyKey.selfDestructOnPingMaxOperations).getValue();
 
-        if ((pingMillisLifetime > 0 && (System.currentTimeMillis() - this.connectionCreationTimeMillis) > pingMillisLifetime)
-                || (pingMaxOperations > 0 && pingMaxOperations <= getCommandCount())) {
+        if (pingMillisLifetime > 0 && System.currentTimeMillis() - this.connectionCreationTimeMillis > pingMillisLifetime
+                || pingMaxOperations > 0 && pingMaxOperations <= getCommandCount()) {
 
             invokeNormalCloseListeners();
 
             throw ExceptionFactory.createException(Messages.getString("Connection.exceededConnectionLifetime"),
                     MysqlErrorNumbers.SQL_STATE_COMMUNICATION_LINK_FAILURE, 0, false, null, this.exceptionInterceptor);
         }
-        sendCommand(this.commandBuilder.buildComPing(null), false, timeoutMillis); // it isn't safe to use a shared packet here 
+        this.protocol.sendCommand(this.commandBuilder.buildComPing(null), false, timeoutMillis); // it isn't safe to use a shared packet here
     }
 
     public long getConnectionCreationTimeMillis() {
@@ -746,6 +743,7 @@ public class NativeSession extends CoreSession implements Serializable {
         this.connectionCreationTimeMillis = connectionCreationTimeMillis;
     }
 
+    @Override
     public boolean isClosed() {
         return this.isClosed;
     }
@@ -828,4 +826,11 @@ public class NativeSession extends CoreSession implements Serializable {
         }
         return this.cancelTimer;
     }
+
+    public void resetSessionState() {
+        checkClosed();
+        NativePacketPayload message = this.commandBuilder.buildComResetConnection(((NativeProtocol) this.protocol).getSharedSendPacket());
+        this.protocol.sendCommand(message, false, 0);
+    }
+
 }

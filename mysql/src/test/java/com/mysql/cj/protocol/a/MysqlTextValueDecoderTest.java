@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -31,8 +31,8 @@ package com.mysql.cj.protocol.a;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 import org.junit.jupiter.api.Test;
 
@@ -50,6 +50,7 @@ import com.mysql.cj.result.ValueFactory;
  * Tests for {@link MysqlTextValueDecoder}.
  */
 public class MysqlTextValueDecoderTest {
+
     private MysqlTextValueDecoder valueDecoder = new MysqlTextValueDecoder();
 
     @Test
@@ -67,6 +68,7 @@ public class MysqlTextValueDecoderTest {
                 return its.getNanos();
             }
 
+            @Override
             public String getTargetTypeName() {
                 return Integer.class.getName();
             }
@@ -75,6 +77,7 @@ public class MysqlTextValueDecoderTest {
             public Integer createFromBytes(byte[] bytes, int offset, int length, Field f) {
                 return null;
             }
+
         };
 
         // the fractional second part is determined by the # of digits
@@ -96,20 +99,20 @@ public class MysqlTextValueDecoderTest {
         assertEquals(String.valueOf(Integer.MAX_VALUE), this.valueDecoder.decodeUInt4(String.valueOf(Integer.MAX_VALUE).getBytes(), 0, 10, vf));
         assertEquals("2147483648",
                 this.valueDecoder.decodeUInt4(Constants.BIG_INTEGER_MAX_INTEGER_VALUE.add(Constants.BIG_INTEGER_ONE).toString().getBytes(), 0, 10, vf));
-        try {
+
+        assertThrows(NumberOutOfRange.class, () -> {
             this.valueDecoder.decodeInt4(Constants.BIG_INTEGER_MAX_INTEGER_VALUE.add(Constants.BIG_INTEGER_ONE).toString().getBytes(), 0, 10, vf);
-            fail("Exception should be thrown for decodeInt4(Integer.MAX_VALUE + 1)");
-        } catch (NumberOutOfRange ex) {
-            // expected
-        }
+        }, "Exception should be thrown for decodeInt4(Integer.MAX_VALUE + 1)");
 
         byte[] uint8LessThanMaxLong = "8223372036854775807".getBytes();
         ValueFactory<String> fromLongOnly = new DefaultValueFactory<String>(new DefaultPropertySet()) {
+
             @Override
             public String createFromLong(long l) {
                 return Long.valueOf(l).toString();
             }
 
+            @Override
             public String getTargetTypeName() {
                 return null;
             }
@@ -118,6 +121,7 @@ public class MysqlTextValueDecoderTest {
             public String createFromBytes(byte[] bytes, int offset, int length, Field f) {
                 return null;
             }
+
         };
         assertEquals("8223372036854775807", this.valueDecoder.decodeUInt8(uint8LessThanMaxLong, 0, uint8LessThanMaxLong.length, fromLongOnly));
         byte[] uint8MoreThanMaxLong1 = "9223372036854775807".getBytes();
@@ -191,4 +195,5 @@ public class MysqlTextValueDecoderTest {
         assertFalse(MysqlTextValueDecoder.isTimestamp("2004-01-01 10:00:00Z"));
         assertFalse(MysqlTextValueDecoder.isTimestamp("2004-01-01 10:00:00+01:00"));
     }
+
 }

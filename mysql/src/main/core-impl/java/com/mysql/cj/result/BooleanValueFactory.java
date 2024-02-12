@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -53,7 +53,7 @@ public class BooleanValueFactory extends DefaultValueFactory<Boolean> {
     @Override
     public Boolean createFromLong(long l) {
         // Goes back to ODBC driver compatibility, and VB/Automation Languages/COM, where in Windows "-1" can mean true as well.
-        return (l == -1 || l > 0);
+        return l == -1 || l > 0;
     }
 
     @Override
@@ -84,6 +84,7 @@ public class BooleanValueFactory extends DefaultValueFactory<Boolean> {
         return createFromLong(l);
     }
 
+    @Override
     public String getTargetTypeName() {
         return Boolean.class.getName();
     }
@@ -97,9 +98,9 @@ public class BooleanValueFactory extends DefaultValueFactory<Boolean> {
         String s = StringUtils.toString(bytes, offset, length, f.getEncoding());
         byte[] newBytes = s.getBytes();
 
-        if (s.equalsIgnoreCase("Y") || s.equalsIgnoreCase("true")) {
+        if (s.equalsIgnoreCase("Y") || s.equalsIgnoreCase("yes") || s.equalsIgnoreCase("T") || s.equalsIgnoreCase("true")) {
             return createFromLong(1);
-        } else if (s.equalsIgnoreCase("N") || s.equalsIgnoreCase("false")) {
+        } else if (s.equalsIgnoreCase("N") || s.equalsIgnoreCase("no") || s.equalsIgnoreCase("F") || s.equalsIgnoreCase("false")) {
             return createFromLong(0);
         } else if (s.contains("e") || s.contains("E") || s.matches("-?\\d*\\.\\d*")) {
             // floating point
@@ -107,11 +108,12 @@ public class BooleanValueFactory extends DefaultValueFactory<Boolean> {
         } else if (s.matches("-?\\d+")) {
             // integer
             if (s.charAt(0) == '-' // TODO shouldn't we check the length as well?
-                    || length <= (MysqlTextValueDecoder.MAX_SIGNED_LONG_LEN - 1) && newBytes[0] >= '0' && newBytes[0] <= '8') {
+                    || length <= MysqlTextValueDecoder.MAX_SIGNED_LONG_LEN - 1 && newBytes[0] >= '0' && newBytes[0] <= '8') {
                 return createFromLong(MysqlTextValueDecoder.getLong(newBytes, 0, newBytes.length));
             }
             return createFromBigInteger(MysqlTextValueDecoder.getBigInteger(newBytes, 0, newBytes.length));
         }
         throw new DataConversionException(Messages.getString("ResultSet.UnableToInterpretString", new Object[] { s }));
     }
+
 }

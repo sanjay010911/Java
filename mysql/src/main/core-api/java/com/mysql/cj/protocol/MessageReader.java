@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2018, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -39,7 +39,7 @@ public interface MessageReader<H extends MessageHeader, M extends Message> {
 
     /**
      * Read the next message header from server, possibly blocking indefinitely until the message is received.
-     * 
+     *
      * @return {@link MessageHeader} of the next message
      * @throws IOException
      *             if an error occurs
@@ -47,10 +47,22 @@ public interface MessageReader<H extends MessageHeader, M extends Message> {
     H readHeader() throws IOException;
 
     /**
+     * Read the next message header from server, possibly blocking indefinitely until the message is received,
+     * and cache it so that the next {@link #readHeader()} return the same header.
+     *
+     * @return {@link MessageHeader} of the next message
+     * @throws IOException
+     *             if an error occurs
+     */
+    default H probeHeader() throws IOException {
+        return readHeader();
+    }
+
+    /**
      * Read message from server into to the given {@link Message} instance or into the new one if not present.
      * For asynchronous channel it synchronously reads the next message in the stream, blocking until the message is read fully.
      * Could throw CJCommunicationsException wrapping an {@link IOException} during read or parse
-     * 
+     *
      * @param reuse
      *            {@link Message} object to reuse. May be ignored by implementation.
      * @param header
@@ -62,10 +74,28 @@ public interface MessageReader<H extends MessageHeader, M extends Message> {
     M readMessage(Optional<M> reuse, H header) throws IOException;
 
     /**
+     * Read message from server into to the given {@link Message} instance or into the new one if not present
+     * and cache it so that the next {@link #readMessage(Optional, MessageHeader)} return the same message.
+     * For asynchronous channel it synchronously reads the next message in the stream, blocking until the message is read fully.
+     * Could throw CJCommunicationsException wrapping an {@link IOException} during read or parse
+     *
+     * @param reuse
+     *            {@link Message} object to reuse. May be ignored by implementation.
+     * @param header
+     *            {@link MessageHeader} instance
+     * @return {@link Message} instance
+     * @throws IOException
+     *             if an error occurs
+     */
+    default M probeMessage(Optional<M> reuse, H header) throws IOException {
+        return readMessage(reuse, header);
+    }
+
+    /**
      * Read message from server into to the given {@link Message} instance or into the new one if not present.
      * For asynchronous channel it synchronously reads the next message in the stream, blocking until the message is read fully.
      * Could throw WrongArgumentException if the expected message type is not the next message (exception will be thrown in *caller* context).
-     * 
+     *
      * @param reuse
      *            {@link Message} object to reuse. May be ignored by implementation.
      * @param expectedType
@@ -79,8 +109,18 @@ public interface MessageReader<H extends MessageHeader, M extends Message> {
     }
 
     /**
+     * Skips the next packet, or the current one if previously probed, by reading and discarding it.
+     *
+     * @throws IOException
+     *             if an error occurs
+     */
+    default void skipPacket() throws IOException {
+        readMessage(Optional.empty(), readHeader());
+    }
+
+    /**
      * Queue a {@link MessageListener} to receive messages delivered asynchronously.
-     * 
+     *
      * @param l
      *            {@link MessageListener}
      */
@@ -90,7 +130,7 @@ public interface MessageReader<H extends MessageHeader, M extends Message> {
 
     /**
      * Get last message sequence number, as it was stored by {@link #readHeader()}.
-     * 
+     *
      * @return number
      */
     default byte getMessageSequence() {
@@ -106,7 +146,7 @@ public interface MessageReader<H extends MessageHeader, M extends Message> {
 
     /**
      * Return a MessageReader instance free of decorators.
-     * 
+     *
      * @return {@link MessageReader}
      */
     default MessageReader<H, M> undecorateAll() {
@@ -116,7 +156,7 @@ public interface MessageReader<H extends MessageHeader, M extends Message> {
     /**
      * Return the previous MessageReader instance from the decorators chain or the current MessageReader
      * if it is the first entry in a chain.
-     * 
+     *
      * @return {@link MessageReader}
      */
     default MessageReader<H, M> undecorate() {

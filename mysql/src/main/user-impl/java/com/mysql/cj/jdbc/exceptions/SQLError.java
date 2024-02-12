@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -29,6 +29,7 @@
 
 package com.mysql.cj.jdbc.exceptions;
 
+import java.sql.BatchUpdateException;
 import java.sql.SQLDataException;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
@@ -48,17 +49,17 @@ import com.mysql.cj.util.Util;
  * SQLError is a utility class that maps MySQL error codes to SQL error codes as is required by the JDBC spec.
  */
 public class SQLError {
+
     /*
      * SQL State Class SQLNonTransientException Subclass 08
      * SQLNonTransientConnectionException 22 SQLDataException 23
      * SQLIntegrityConstraintViolationException N/A
      * SQLInvalidAuthorizationException 42 SQLSyntaxErrorException
-     * 
+     *
      * SQL State Class SQLTransientException Subclass 08
      * SQLTransientConnectionException 40 SQLTransactionRollbackException N/A
      * SQLTimeoutException
      */
-
     public static SQLException createSQLException(String message, String sqlState, ExceptionInterceptor interceptor) {
         return createSQLException(message, sqlState, 0, interceptor);
     }
@@ -154,7 +155,6 @@ public class SQLError {
 
     public static SQLException createCommunicationsException(JdbcConnection conn, PacketSentTimeHolder packetSentTimeHolder,
             PacketReceivedTimeHolder packetReceivedTimeHolder, Exception underlyingException, ExceptionInterceptor interceptor) {
-
         SQLException exToReturn = new CommunicationsException(conn, packetSentTimeHolder, packetReceivedTimeHolder, underlyingException);
 
         if (underlyingException != null) {
@@ -186,7 +186,7 @@ public class SQLError {
 
     /**
      * Run exception through an ExceptionInterceptor chain.
-     * 
+     *
      * @param exInterceptor
      *            exception interceptor
      * @param sqlEx
@@ -205,9 +205,8 @@ public class SQLError {
     }
 
     /**
-     * Create a BatchUpdateException taking in consideration the JDBC version in use. For JDBC version prior to 4.2 the updates count array has int elements
-     * while JDBC 4.2 and beyond uses long values.
-     * 
+     * Create a BatchUpdateException.
+     *
      * @param underlyingEx
      *            underlying exception
      * @param updateCounts
@@ -221,15 +220,14 @@ public class SQLError {
     public static SQLException createBatchUpdateException(SQLException underlyingEx, long[] updateCounts, ExceptionInterceptor interceptor)
             throws SQLException {
         // TODO should not throw SQLException
-        SQLException newEx = (SQLException) Util.getInstance("java.sql.BatchUpdateException",
-                new Class<?>[] { String.class, String.class, int.class, long[].class, Throwable.class },
-                new Object[] { underlyingEx.getMessage(), underlyingEx.getSQLState(), underlyingEx.getErrorCode(), updateCounts, underlyingEx }, interceptor);
+        SQLException newEx = new BatchUpdateException(underlyingEx.getMessage(), underlyingEx.getSQLState(), underlyingEx.getErrorCode(), updateCounts,
+                underlyingEx);
         return runThroughExceptionInterceptor(interceptor, newEx);
     }
 
     /**
      * Create a SQLFeatureNotSupportedException or a NotImplemented exception according to the JDBC version in use.
-     * 
+     *
      * @return SQLException
      */
     public static SQLException createSQLFeatureNotSupportedException() {
@@ -238,7 +236,7 @@ public class SQLError {
 
     /**
      * Create a SQLFeatureNotSupportedException or a NotImplemented exception according to the JDBC version in use.
-     * 
+     *
      * @param message
      *            error message
      * @param sqlState
@@ -253,4 +251,5 @@ public class SQLError {
         SQLException newEx = new SQLFeatureNotSupportedException(message, sqlState);
         return runThroughExceptionInterceptor(interceptor, newEx);
     }
+
 }

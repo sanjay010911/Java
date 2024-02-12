@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2016, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -55,8 +55,12 @@ public class MultiPacketReader implements MessageReader<NativePacketHeader, Nati
     }
 
     @Override
-    public NativePacketPayload readMessage(Optional<NativePacketPayload> reuse, NativePacketHeader header) throws IOException {
+    public NativePacketHeader probeHeader() throws IOException {
+        return this.packetReader.probeHeader();
+    }
 
+    @Override
+    public NativePacketPayload readMessage(Optional<NativePacketPayload> reuse, NativePacketHeader header) throws IOException {
         int packetLength = header.getMessageSize();
         NativePacketPayload buf = this.packetReader.readMessage(reuse, header);
 
@@ -82,6 +86,44 @@ public class MultiPacketReader implements MessageReader<NativePacketHeader, Nati
                 }
 
                 this.packetReader.readMessage(Optional.of(multiPacket), hdr);
+
+                buf.writeBytes(StringLengthDataType.STRING_FIXED, multiPacket.getByteBuffer(), 0, multiPacketLength);
+
+            } while (multiPacketLength == NativeConstants.MAX_PACKET_SIZE);
+
+            buf.setPosition(0);
+        }
+
+        return buf;
+    }
+
+    @Override
+    public NativePacketPayload probeMessage(Optional<NativePacketPayload> reuse, NativePacketHeader header) throws IOException {
+        int packetLength = header.getMessageSize();
+        NativePacketPayload buf = this.packetReader.probeMessage(reuse, header);
+
+        if (packetLength == NativeConstants.MAX_PACKET_SIZE) { // it's a multi-packet
+
+            buf.setPosition(NativeConstants.MAX_PACKET_SIZE);
+
+            NativePacketPayload multiPacket = null;
+            int multiPacketLength = -1;
+            byte multiPacketSeq = getMessageSequence();
+
+            do {
+                NativePacketHeader hdr = readHeader();
+                multiPacketLength = hdr.getMessageSize();
+
+                if (multiPacket == null) {
+                    multiPacket = new NativePacketPayload(multiPacketLength);
+                }
+
+                multiPacketSeq++;
+                if (multiPacketSeq != hdr.getMessageSequence()) {
+                    throw new IOException(Messages.getString("PacketReader.10"));
+                }
+
+                this.packetReader.probeMessage(Optional.of(multiPacket), hdr);
 
                 buf.writeBytes(StringLengthDataType.STRING_FIXED, multiPacket.getByteBuffer(), 0, multiPacketLength);
 

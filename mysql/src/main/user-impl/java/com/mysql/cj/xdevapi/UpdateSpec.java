@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -29,6 +29,7 @@
 
 package com.mysql.cj.xdevapi;
 
+import com.mysql.cj.Messages;
 import com.mysql.cj.x.protobuf.MysqlxCrud.UpdateOperation;
 import com.mysql.cj.x.protobuf.MysqlxExpr.ColumnIdentifier;
 import com.mysql.cj.x.protobuf.MysqlxExpr.Expr;
@@ -45,7 +46,18 @@ public class UpdateSpec {
 
     /**
      * Constructor.
-     * 
+     *
+     * @param updateType
+     *            update operation type
+     */
+    public UpdateSpec(UpdateType updateType) {
+        this.updateType = UpdateOperation.UpdateType.valueOf(updateType.name());
+        this.source = ColumnIdentifier.getDefaultInstance();
+    }
+
+    /**
+     * Constructor.
+     *
      * @param updateType
      *            update operation type
      * @param source
@@ -53,6 +65,9 @@ public class UpdateSpec {
      */
     public UpdateSpec(UpdateType updateType, String source) {
         this.updateType = UpdateOperation.UpdateType.valueOf(updateType.name());
+        if (source == null || source.trim().isEmpty()) {
+            throw new XDevAPIError(Messages.getString("ModifyStatement.0", new String[] { "docPath" }));
+        }
         // accommodate parser's documentField() handling by removing "$"
         if (source.length() > 0 && source.charAt(0) == '$') {
             source = source.substring(1);
@@ -62,7 +77,7 @@ public class UpdateSpec {
 
     /**
      * Get X Protocol update type.
-     * 
+     *
      * @return X Protocol UpdateOperation.UpdateType
      */
     public Object getUpdateType() {
@@ -71,7 +86,7 @@ public class UpdateSpec {
 
     /**
      * Get X Protocol ColumnIdentifier.
-     * 
+     *
      * @return X Protocol MysqlxExpr.ColumnIdentifier
      */
     public Object getSource() {
@@ -80,7 +95,7 @@ public class UpdateSpec {
 
     /**
      * Set value to be set by this update operation.
-     * 
+     *
      * @param value
      *            value expression
      * @return this UpdateSpec
@@ -92,10 +107,11 @@ public class UpdateSpec {
 
     /**
      * Get X Protocol value expression.
-     * 
+     *
      * @return X Protocol MysqlxExpr.Expr
      */
     public Object getValue() {
         return this.value;
     }
+
 }

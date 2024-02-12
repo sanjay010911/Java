@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -38,7 +38,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
 
 import org.junit.jupiter.api.Test;
 
@@ -62,10 +61,9 @@ import com.mysql.cj.xdevapi.XDevAPIError;
  * @todo
  */
 public class CollectionRemoveTest extends BaseCollectionTestCase {
+
     @Test
     public void deleteAll() {
-        assumeTrue(this.isSetForXTests);
-
         if (!mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.5"))) {
             this.collection.add("{\"_id\": \"1\"}").execute(); // Requires manual _id.
             this.collection.add("{\"_id\": \"2\"}").execute();
@@ -78,18 +76,14 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
 
         assertEquals(3, this.collection.count());
 
-        assertThrows(XDevAPIError.class, "Parameter 'criteria' must not be null or empty.", new Callable<Void>() {
-            public Void call() throws Exception {
-                CollectionRemoveTest.this.collection.remove(null).execute();
-                return null;
-            }
+        assertThrows(XDevAPIError.class, "Parameter 'criteria' must not be null or empty.", () -> {
+            CollectionRemoveTest.this.collection.remove(null).execute();
+            return null;
         });
 
-        assertThrows(XDevAPIError.class, "Parameter 'criteria' must not be null or empty.", new Callable<Void>() {
-            public Void call() throws Exception {
-                CollectionRemoveTest.this.collection.remove(" ").execute();
-                return null;
-            }
+        assertThrows(XDevAPIError.class, "Parameter 'criteria' must not be null or empty.", () -> {
+            CollectionRemoveTest.this.collection.remove(" ").execute();
+            return null;
         });
 
         this.collection.remove("false").execute();
@@ -104,8 +98,6 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
 
     @Test
     public void deleteSome() {
-        assumeTrue(this.isSetForXTests);
-
         if (!mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.5"))) {
             this.collection.add("{\"_id\": \"1\"}").execute(); // Requires manual _id.
             this.collection.add("{\"_id\": \"2\"}").execute();
@@ -123,8 +115,6 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
 
     @Test
     public void removeOne() {
-        assumeTrue(this.isSetForXTests);
-
         if (!mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.5"))) {
             this.collection.add("{\"_id\": \"1\", \"x\":1}").execute(); // Requires manual _id.
             this.collection.add("{\"_id\": \"2\", \"x\":2}").execute();
@@ -158,7 +148,7 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
 
     @Test
     public void testPreparedStatements() {
-        assumeTrue(this.isSetForXTests && mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.14")));
+        assumeTrue(mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.14")), "MySQL 8.0.14+ is required to run this test.");
 
         try {
             // Prepare test data.
@@ -404,8 +394,6 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
     @Test
     @SuppressWarnings("deprecation")
     public void testDeprecateWhere() throws Exception {
-        assumeTrue(this.isSetForXTests);
-
         this.collection.add("{\"_id\":\"1\", \"ord\": 1}", "{\"_id\":\"2\", \"ord\": 2}", "{\"_id\":\"3\", \"ord\": 3}", "{\"_id\":\"4\", \"ord\": 4}",
                 "{\"_id\":\"5\", \"ord\": 5}", "{\"_id\":\"6\", \"ord\": 6}", "{\"_id\":\"7\", \"ord\": 7}", "{\"_id\":\"8\", \"ord\": 8}").execute();
 
@@ -420,8 +408,6 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
     @SuppressWarnings("deprecation")
     @Test
     public void testCollectionRemoveBasic() throws Exception {
-        assumeTrue(this.isSetForXTests);
-
         int i = 0, j = 0, maxrec = 100, recCnt = 0, arraySize = 30;
         Result res = null;
         DocResult docs = null;
@@ -437,9 +423,9 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
             newDoc2.add("F3", new JsonNumber().setValue(String.valueOf(l1 - i)));
             newDoc2.add("F4", new JsonNumber().setValue(String.valueOf(l2 + i)));
             newDoc2.add("F5", new JsonNumber().setValue(String.valueOf(1 + i)));
-            newDoc2.add("F6", new JsonString().setValue((2000 + i) + "-02-" + (i * 2 + 10)));
+            newDoc2.add("F6", new JsonString().setValue(2000 + i + "-02-" + (i * 2 + 10)));
             JsonArray jarray = new JsonArray();
-            for (j = 0; j < (arraySize); j++) {
+            for (j = 0; j < arraySize; j++) {
                 jarray.addValue(new JsonString().setValue("String-" + i + "-" + j));
             }
             newDoc2.add("ARR1", jarray);
@@ -447,7 +433,7 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
             newDoc2 = null;
         }
         this.collection.add(jsonlist).execute();
-        assertEquals((maxrec), this.collection.count());
+        assertEquals(maxrec, this.collection.count());
 
         /* find without Condition */
         docs = this.collection.find("$.F4<0").fields("$._id as _id, $.F1 as f1, $.F2 as f2").execute();
@@ -512,21 +498,21 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
 
         /* remove All with a true condition */
         i = (int) this.collection.count();
-        res = this.collection.remove("true").limit((maxrec * 10)).orderBy("CAST($.F5 as SIGNED)").execute();
+        res = this.collection.remove("true").limit(maxrec * 10).orderBy("CAST($.F5 as SIGNED)").execute();
         assertEquals(i, res.getAffectedItemsCount());
         docs = this.collection.find("$.ARR1[1]  like 'S%'").fields("$._id as _id, $.F1 as f1, $.F2 as f2").execute();
         assertFalse(docs.hasNext());
 
         /* remove with a false condition */
         i = (int) this.collection.count();
-        res = this.collection.remove("false").limit((maxrec * 10)).orderBy("CAST($.F5 as SIGNED)").execute();
+        res = this.collection.remove("false").limit(maxrec * 10).orderBy("CAST($.F5 as SIGNED)").execute();
         assertEquals(0, res.getAffectedItemsCount());
     }
 
     @SuppressWarnings("deprecation")
     @Test
     public void testCollectionRemoveBindComplex() throws Exception {
-        assumeTrue(this.isSetForXTests && mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.0")));
+        assumeTrue(mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.0")), "MySQL 8.0+ is required to run this test.");
 
         int i = 0, j = 0, maxrec = 20, arraySize = 3;
         DbDoc doc = null;
@@ -544,9 +530,9 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
             newDoc2.add("F3", new JsonNumber().setValue(String.valueOf(l1 - i)));
             newDoc2.add("F4", new JsonNumber().setValue(String.valueOf(l2 + i)));
             newDoc2.add("F5", new JsonNumber().setValue(String.valueOf(1 + i)));
-            newDoc2.add("F6", new JsonString().setValue((2000 + i) + "-02-" + (i * 2 + 10)));
+            newDoc2.add("F6", new JsonString().setValue(2000 + i + "-02-" + (i * 2 + 10)));
             JsonArray jarray = new JsonArray();
-            for (j = 0; j < (arraySize); j++) {
+            for (j = 0; j < arraySize; j++) {
                 if (j == 1) {
                     jarray.addValue(new JsonString().setValue("String-" + j));
                 } else {
@@ -571,7 +557,7 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
         this.collection.createIndex("index3", "{\"fields\": [{\"field\": \"$.F5\", \"type\": \"INT\", \"required\": true}],  \"type\" : \"INDEX\"}");
         this.collection.createIndex("index4", "{\"fields\": [{\"field\": \"$.F3\", \"type\": \"BIGINT\", \"required\": true}],  \"type\" : \"INDEX\"}");
 
-        assertEquals((maxrec), this.collection.count());
+        assertEquals(maxrec, this.collection.count());
 
         assertThrows(XProtocolError.class, "ERROR 5115 \\(HY000\\) Document is missing a required field",
                 () -> this.collection.modify("CAST($.F5 as SIGNED) = 1").unset("$.ARR1[0]").sort("$._id").execute()); //dropping an empty string as collection
@@ -582,7 +568,7 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
         i = 1;
         while (docs.hasNext()) {
             doc = docs.next();
-            assertEquals((long) (i), (long) (((JsonNumber) doc.get("F5")).getInteger()));
+            assertEquals((long) i, (long) ((JsonNumber) doc.get("F5")).getInteger());
         }
 
         /* Named Param */
@@ -593,7 +579,7 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
         assertFalse(docs.hasNext());
 
         /* Array */
-        res = this.collection.remove("CAST($.F5 as SIGNED) > ? and CAST($.F5 as SIGNED) < ?").bind(new Object[] { (-1), (3) }).orderBy("CAST($.F5 as SIGNED)")
+        res = this.collection.remove("CAST($.F5 as SIGNED) > ? and CAST($.F5 as SIGNED) < ?").bind(new Object[] { -1, 3 }).orderBy("CAST($.F5 as SIGNED)")
                 .execute();
         assertEquals(1, res.getAffectedItemsCount());
         docs = this.collection.find("CAST($.F5 as SIGNED)  <? ").bind(3).fields("$.F5 as F5").execute();
@@ -724,4 +710,5 @@ public class CollectionRemoveTest extends BaseCollectionTestCase {
             return null;
         });
     }
+
 }

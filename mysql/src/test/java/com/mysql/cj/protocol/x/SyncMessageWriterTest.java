@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -30,8 +30,8 @@
 package com.mysql.cj.protocol.x;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
@@ -48,6 +48,7 @@ import com.mysql.cj.x.protobuf.MysqlxSession.AuthenticateStart;
 import com.mysql.cj.x.protobuf.MysqlxSession.Reset;
 
 public class SyncMessageWriterTest {
+
     private ByteArrayOutputStream outputStream;
     private SyncMessageSender writer;
 
@@ -59,7 +60,7 @@ public class SyncMessageWriterTest {
 
     /**
      * Test that we can (properly) write a complete message.
-     * 
+     *
      * @throws IOException
      */
     @Test
@@ -87,13 +88,10 @@ public class SyncMessageWriterTest {
 
     @Test
     public void testBadMessageClass() {
-        try {
+        assertThrows(WrongArgumentException.class, () -> {
             // try sending "Ok" which is a server-sent message. should fail with exception
             this.writer.send(new XMessage(Ok.getDefaultInstance()));
-            fail("Writing OK message should fail");
-        } catch (WrongArgumentException ex) {
-            // expected
-        }
+        }, "Writing OK message should fail");
     }
 
     @Test
@@ -107,4 +105,5 @@ public class SyncMessageWriterTest {
         long lastSent2 = this.writer.getLastPacketSentTime();
         assertTrue(lastSent2 >= lastSent1);
     }
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -31,6 +31,7 @@ package testsuite;
 
 import static com.mysql.cj.util.StringUtils.isNullOrEmpty;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -40,7 +41,6 @@ import static org.junit.jupiter.api.Assertions.fail;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.FilenameFilter;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.InetAddress;
@@ -52,6 +52,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.List;
@@ -60,6 +61,8 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.StringJoiner;
 import java.util.concurrent.Callable;
+
+import javax.net.ssl.SSLContext;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -70,6 +73,7 @@ import com.mysql.cj.conf.ConnectionUrl;
 import com.mysql.cj.conf.ConnectionUrlParser;
 import com.mysql.cj.conf.HostInfo;
 import com.mysql.cj.conf.PropertyDefinitions;
+import com.mysql.cj.conf.PropertyDefinitions.SslMode;
 import com.mysql.cj.conf.PropertyKey;
 import com.mysql.cj.jdbc.JdbcConnection;
 import com.mysql.cj.jdbc.NonRegisteringDriver;
@@ -88,20 +92,13 @@ public abstract class BaseTestCase {
     public static String dbUrl = "jdbc:mysql:///test";
     public static String timeZoneFreeDbUrl = "jdbc:mysql:///test";
     protected static ConnectionUrl mainConnectionUrl = null;
-
-    /**
-     * JDBC URL, initialized from com.mysql.cj.testsuite.url.openssl system property and its connection URL
-     */
-    protected static String sha256Url = null;
-    protected static ConnectionUrl sha256ConnectionUrl = null;
+    protected boolean isOpenSSL = false;
 
     /** Instance counter */
     private static int instanceCount = 1;
 
     /** Connection to server, initialized in setUp() Cleaned up in tearDown(). */
     protected Connection conn = null;
-
-    protected Connection sha256Conn = null;
 
     /** Server version `this.conn' is connected to. */
     protected ServerVersion serverVersion;
@@ -121,7 +118,7 @@ public abstract class BaseTestCase {
     /**
      * Default catalog.
      */
-    protected final String dbName;
+    protected String dbName;
 
     /**
      * PreparedStatement to be used in tests, not initialized. Cleaned up in
@@ -134,15 +131,11 @@ public abstract class BaseTestCase {
      */
     protected ResultSet rs = null;
 
-    protected ResultSet sha256Rs = null;
-
     /**
      * Statement to be used in tests, initialized in setUp(). Cleaned up in
      * tearDown().
      */
     protected Statement stmt = null;
-
-    protected Statement sha256Stmt = null;
 
     private boolean isOnCSFS = true;
 
@@ -154,20 +147,33 @@ public abstract class BaseTestCase {
 
         String newDbUrl = System.getProperty(PropertyDefinitions.SYSP_testsuite_url);
 
-        if ((newDbUrl != null) && (newDbUrl.trim().length() != 0)) {
-            dbUrl = newDbUrl;
+        if (newDbUrl != null && newDbUrl.trim().length() != 0) {
+            dbUrl = sanitizeDbName(newDbUrl);
         }
-        timeZoneFreeDbUrl = dbUrl.replaceAll(PropertyKey.connectionTimeZone.getKeyName() + "=", PropertyKey.connectionTimeZone.getKeyName() + "VOID=")
-                .replaceAll("serverTimezone=", "serverTimezoneVOID=");
         mainConnectionUrl = ConnectionUrl.getConnectionUrlInstance(dbUrl, null);
         this.dbName = mainConnectionUrl.getDatabase();
 
-        String defaultSha256Url = System.getProperty(PropertyDefinitions.SYSP_testsuite_url_openssl);
+        timeZoneFreeDbUrl = dbUrl.replaceAll(PropertyKey.connectionTimeZone.getKeyName() + "=", PropertyKey.connectionTimeZone.getKeyName() + "VOID=")
+                .replaceAll("serverTimezone=", "serverTimezoneVOID=");
+    }
 
-        if ((defaultSha256Url != null) && (defaultSha256Url.trim().length() != 0)) {
-            sha256Url = defaultSha256Url;
-            sha256ConnectionUrl = ConnectionUrl.getConnectionUrlInstance(sha256Url, null);
+    private String sanitizeDbName(String url) {
+        ConnectionUrl parsedUrl = ConnectionUrl.getConnectionUrlInstance(url, null);
+        if (StringUtils.isNullOrEmpty(parsedUrl.getDatabase())) {
+            List<String> splitUp = StringUtils.split(url, "\\?", true);
+            StringBuilder value = new StringBuilder();
+            for (int i = 0; i < splitUp.size(); i++) {
+                value.append(splitUp.get(i));
+                if (i == 0) {
+                    if (!splitUp.get(i).endsWith("/")) {
+                        value.append("/");
+                    }
+                    value.append("cjtest_8_0?");
+                }
+            }
+            url = value.toString();
         }
+        return url;
     }
 
     protected void createSchemaObject(String objectType, String objectName, String columnsAndOtherStuff) throws SQLException {
@@ -326,19 +332,6 @@ public abstract class BaseTestCase {
         }
     }
 
-    protected Connection getAdminConnection() throws SQLException {
-        return getAdminConnectionWithProps(new Properties());
-    }
-
-    protected Connection getAdminConnectionWithProps(Properties props) throws SQLException {
-        String adminUrl = System.getProperty(PropertyDefinitions.SYSP_testsuite_url_admin);
-
-        if (adminUrl != null) {
-            return DriverManager.getConnection(adminUrl, props);
-        }
-        return null;
-    }
-
     public Connection getConnectionWithProps(String propsList) throws SQLException {
         return getConnectionWithProps(dbUrl, propsList);
     }
@@ -371,13 +364,13 @@ public abstract class BaseTestCase {
 
     /**
      * Returns a new connection with the given properties
-     * 
+     *
      * @param props
      *            the properties to use (the URL will come from the standard for
      *            this testcase).
-     * 
+     *
      * @return a new connection using the given properties.
-     * 
+     *
      * @throws SQLException
      */
     public Connection getConnectionWithProps(Properties props) throws SQLException {
@@ -389,22 +382,16 @@ public abstract class BaseTestCase {
     }
 
     protected Connection getNewConnection() throws SQLException {
-        return DriverManager.getConnection(dbUrl);
-    }
-
-    protected Connection getNewSha256Connection() throws SQLException {
-        if (sha256Url != null) {
-            Properties props = new Properties();
-            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
-            return DriverManager.getConnection(sha256Url, props);
-        }
-        return null;
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        return DriverManager.getConnection(dbUrl, props);
     }
 
     /**
      * Returns the per-instance counter (for messages when multi-threading
      * stress tests)
-     * 
+     *
      * @return int the instance number
      */
     protected int getInstanceNumber() {
@@ -423,12 +410,12 @@ public abstract class BaseTestCase {
 
     /**
      * Returns the named MySQL variable from the currently connected server.
-     * 
+     *
      * @param variableName
      *            the name of the variable to return
-     * 
+     *
      * @return the value of the given variable, or NULL if it doesn't exist
-     * 
+     *
      * @throws SQLException
      *             if an error occurs
      */
@@ -439,9 +426,9 @@ public abstract class BaseTestCase {
     /**
      * Returns the properties that represent the default URL used for
      * connections for all testcases.
-     * 
+     *
      * @return properties parsed from com.mysql.jdbc.testsuite.url
-     * 
+     *
      * @throws SQLException
      *             if parsing fails
      */
@@ -474,7 +461,7 @@ public abstract class BaseTestCase {
     /**
      * Some tests build connections strings for internal usage but, in order for them to work, they may require some connection properties set in the main test
      * suite URL. For example 'connectionTimeZone' is one of those properties.
-     * 
+     *
      * @param props
      *            the Properties object where to add the missing connection properties
      * @return
@@ -584,19 +571,15 @@ public abstract class BaseTestCase {
     }
 
     protected Object getSingleValue(String tableName, String columnName, String whereClause) throws SQLException {
-        return getSingleValueWithQuery("SELECT " + columnName + " FROM " + tableName + ((whereClause == null) ? "" : " " + whereClause));
+        return getSingleValueWithQuery("SELECT " + columnName + " FROM " + tableName + (whereClause == null ? "" : " " + whereClause));
     }
 
     protected Object getSingleValueWithQuery(String query) throws SQLException {
         return getSingleIndexedValueWithQuery(1, query);
     }
 
-    protected boolean isAdminConnectionConfigured() {
-        return System.getProperty(PropertyDefinitions.SYSP_testsuite_url_admin) != null;
-    }
-
     protected boolean isServerRunningOnWindows() throws SQLException {
-        return (getMysqlVariable("datadir").indexOf('\\') != -1);
+        return getMysqlVariable("datadir").indexOf('\\') != -1;
     }
 
     public void logDebug(String message) {
@@ -629,27 +612,22 @@ public abstract class BaseTestCase {
     /**
      * Checks whether a certain system property is defined, in order to
      * run/not-run certain tests
-     * 
+     *
      * @param propName
      *            the property name to check for
-     * 
+     *
      * @return true if the property is defined.
      */
     protected boolean isSysPropDefined(String propName) {
         String prop = System.getProperty(propName);
-
-        return (prop != null) && (prop.length() > 0);
-    }
-
-    protected boolean runMultiHostTests() {
-        return !isSysPropDefined(PropertyDefinitions.SYSP_testsuite_disable_multihost_tests);
+        return prop != null && prop.length() > 0;
     }
 
     /**
      * Creates resources used by all tests.
-     * 
+     *
      * @param testInfo
-     * 
+     *
      * @throws Exception
      *             if an error occurs.
      */
@@ -662,11 +640,13 @@ public abstract class BaseTestCase {
         this.createdObjects = new ArrayList<>();
 
         Properties props = new Properties();
-        props.setProperty(PropertyKey.useSSL.getKeyName(), "false"); // testsuite is built upon non-SSL default connection
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name()); // testsuite is built upon non-SSL default connection
         props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.createDatabaseIfNotExist.getKeyName(), "true");
+        if (StringUtils.isNullOrEmpty(mainConnectionUrl.getDatabase())) {
+            props.setProperty(PropertyKey.DBNAME.getKeyName(), this.dbName);
+        }
         this.conn = DriverManager.getConnection(dbUrl, props);
-
-        this.sha256Conn = sha256Url == null ? null : DriverManager.getConnection(sha256Url, props);
 
         this.serverVersion = ((JdbcConnection) this.conn).getServerVersion();
 
@@ -677,6 +657,25 @@ public abstract class BaseTestCase {
                 this.rs = this.stmt.executeQuery("SELECT VERSION()");
                 this.rs.next();
                 logDebug("Connected to " + this.rs.getString(1));
+                this.rs.close();
+                this.rs = this.stmt.executeQuery("SHOW VARIABLES LIKE 'auto_generate_certs'");
+                if (this.rs.next()) {
+                    this.isOpenSSL = true;
+                }
+
+                // ensure max_connections value is enough to run tests
+                this.rs.close();
+                this.rs = this.stmt.executeQuery("SHOW VARIABLES LIKE 'max_connections'");
+                this.rs.next();
+                int maxConnections = this.rs.getInt(2);
+
+                this.rs = this.stmt.executeQuery("show status like 'threads_connected'");
+                this.rs.next();
+                int usedConnections = this.rs.getInt(2);
+
+                if (maxConnections - usedConnections < 200) {
+                    this.stmt.executeUpdate("SET GLOBAL max_connections=" + (maxConnections + 200));
+                }
             } else {
                 logDebug("Connected to " + this.conn.getMetaData().getDatabaseProductName() + " / " + this.conn.getMetaData().getDatabaseProductVersion());
             }
@@ -688,31 +687,11 @@ public abstract class BaseTestCase {
         }
 
         this.isOnCSFS = !this.conn.getMetaData().storesLowerCaseIdentifiers();
-
-        if (this.sha256Conn != null) {
-            this.sha256Stmt = this.sha256Conn.createStatement();
-
-            try {
-                if (sha256Url.indexOf("mysql") != -1) {
-                    this.sha256Rs = this.sha256Stmt.executeQuery("SELECT VERSION()");
-                    this.sha256Rs.next();
-                    logDebug("Connected to " + this.sha256Rs.getString(1));
-                } else {
-                    logDebug("Connected to " + this.sha256Conn.getMetaData().getDatabaseProductName() + " / "
-                            + this.sha256Conn.getMetaData().getDatabaseProductVersion());
-                }
-            } finally {
-                if (this.sha256Rs != null) {
-                    this.sha256Rs.close();
-                    this.sha256Rs = null;
-                }
-            }
-        }
     }
 
     /**
      * Destroys resources created during the test case.
-     * 
+     *
      * @throws Exception
      */
     @AfterEach
@@ -724,22 +703,8 @@ public abstract class BaseTestCase {
             }
         }
 
-        if (this.sha256Rs != null) {
-            try {
-                this.sha256Rs.close();
-            } catch (SQLException SQLE) {
-            }
-        }
-
         if (System.getProperty(PropertyDefinitions.SYSP_testsuite_retainArtifacts) == null) {
-            Statement st = this.conn == null || this.conn.isClosed() ? getNewConnection().createStatement() : this.conn.createStatement();
-            Statement sha256st;
-            if (this.sha256Conn == null || this.sha256Conn.isClosed()) {
-                Connection c = getNewSha256Connection();
-                sha256st = c == null ? null : c.createStatement();
-            } else {
-                sha256st = this.sha256Conn.createStatement();
-            }
+            Statement st = (this.conn == null || this.conn.isClosed() ? getNewConnection() : this.conn).createStatement();
 
             for (int i = 0; i < this.createdObjects.size(); i++) {
                 String[] objectInfo = this.createdObjects.get(i);
@@ -748,28 +713,13 @@ public abstract class BaseTestCase {
                     dropSchemaObject(st, objectInfo[0], objectInfo[1]);
                 } catch (SQLException SQLE) {
                 }
-
-                try {
-                    dropSchemaObject(sha256st, objectInfo[0], objectInfo[1]);
-                } catch (SQLException SQLE) {
-                }
             }
             st.close();
-            if (sha256st != null) {
-                sha256st.close();
-            }
         }
 
         if (this.stmt != null) {
             try {
                 this.stmt.close();
-            } catch (SQLException SQLE) {
-            }
-        }
-
-        if (this.sha256Stmt != null) {
-            try {
-                this.sha256Stmt.close();
             } catch (SQLException SQLE) {
             }
         }
@@ -787,26 +737,19 @@ public abstract class BaseTestCase {
             } catch (SQLException SQLE) {
             }
         }
-
-        if (this.sha256Conn != null) {
-            try {
-                this.sha256Conn.close();
-            } catch (SQLException SQLE) {
-            }
-        }
     }
 
     /**
      * Checks whether the database we're connected to meets the given version
      * minimum
-     * 
+     *
      * @param major
      *            the major version to meet
      * @param minor
      *            the minor version to meet
-     * 
+     *
      * @return boolean if the major/minor is met
-     * 
+     *
      * @throws SQLException
      *             if an error occurs.
      */
@@ -817,26 +760,26 @@ public abstract class BaseTestCase {
     /**
      * Checks whether the database we're connected to meets the given version
      * minimum
-     * 
+     *
      * @param major
      *            the major version to meet
      * @param minor
      *            the minor version to meet
      * @param subminor
      *            the subminor version to meet
-     * 
+     *
      * @return boolean if the major/minor is met
-     * 
+     *
      * @throws SQLException
      *             if an error occurs.
      */
     public boolean versionMeetsMinimum(int major, int minor, int subminor) throws SQLException {
-        return (((JdbcConnection) this.conn).getSession().versionMeetsMinimum(major, minor, subminor));
+        return ((JdbcConnection) this.conn).getSession().versionMeetsMinimum(major, minor, subminor);
     }
 
     /**
      * Checks whether the server we're connected to is a MySQL Community edition
-     * 
+     *
      * @return true if connected to a community/gpl server
      */
     protected boolean isCommunityEdition() {
@@ -845,7 +788,7 @@ public abstract class BaseTestCase {
 
     /**
      * Checks whether the server we're connected to is an MySQL Enterprise edition
-     * 
+     *
      * @return true if connected to an enterprise/commercial server
      */
     protected boolean isEnterpriseEdition() {
@@ -864,7 +807,7 @@ public abstract class BaseTestCase {
     protected boolean isRunningOnJRockit() {
         String vmVendor = System.getProperty(PropertyDefinitions.SYSP_java_vm_vendor);
 
-        return (vmVendor != null && vmVendor.toUpperCase(Locale.US).startsWith("BEA"));
+        return vmVendor != null && vmVendor.toUpperCase(Locale.US).startsWith("BEA");
     }
 
     protected boolean isMysqlRunningLocally() {
@@ -891,22 +834,16 @@ public abstract class BaseTestCase {
         StringBuilder buf = new StringBuilder(length);
 
         for (int i = 0; i < length; i++) {
-            buf.append((char) ((Math.random() * 26) + 'a'));
+            buf.append((char) (Math.random() * 26 + 'a'));
         }
 
         return buf.toString();
     }
 
     protected void cleanupTempFiles(final File exampleTempFile, final String tempfilePrefix) {
-
         File tempfilePath = exampleTempFile.getParentFile();
 
-        File[] possibleFiles = tempfilePath.listFiles(new FilenameFilter() {
-
-            public boolean accept(File dir, String name) {
-                return (name.indexOf(tempfilePrefix) != -1 && !exampleTempFile.getName().equals(name));
-            }
-        });
+        File[] possibleFiles = tempfilePath.listFiles((dir, name) -> name.indexOf(tempfilePrefix) != -1 && !exampleTempFile.getName().equals(name));
 
         if (possibleFiles != null) {
             for (int i = 0; i < possibleFiles.length; i++) {
@@ -1001,15 +938,10 @@ public abstract class BaseTestCase {
         try {
             testRoutine.call();
         } catch (Throwable t) {
-            if (!throwable.isAssignableFrom(t.getClass())) {
-                fail(message + "expected exception of type '" + throwable.getName() + "' but instead an exception of type '" + t.getClass().getName()
-                        + "' was thrown.");
-            }
-
-            if (msgMatchesRegex != null && !t.getMessage().matches(msgMatchesRegex)) {
-                fail(message + "the error message «" + t.getMessage() + "» was expected to match «" + msgMatchesRegex + "».");
-            }
-
+            assertTrue(throwable.isAssignableFrom(t.getClass()), message + "expected exception of type '" + throwable.getName()
+                    + "' but instead an exception of type '" + t.getClass().getName() + "' was thrown.");
+            assertFalse(msgMatchesRegex != null && !t.getMessage().matches(msgMatchesRegex),
+                    message + "the error message «" + t.getMessage() + "» was expected to match «" + msgMatchesRegex + "».");
             return throwable.cast(t);
         }
         fail(message + "expected exception of type '" + throwable.getName() + "'.");
@@ -1027,7 +959,7 @@ public abstract class BaseTestCase {
 
     /**
      * Asserts the most recent history of connection attempts from the global data in UnreliableSocketFactory.
-     * 
+     *
      * @param expectedConnectionsHistory
      *            The list of expected events. Use UnreliableSocketFactory.getHostConnectedStatus(String), UnreliableSocketFactory.getHostFailedStatus(String)
      *            and UnreliableSocketFactory.getHostUnknownStatus(String) to build proper syntax for host+status identification.
@@ -1057,7 +989,7 @@ public abstract class BaseTestCase {
     protected static void assertSecureConnection(Connection conn) throws Exception {
         try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery("SHOW STATUS LIKE 'Ssl_version'")) {
             assertTrue(rs.next());
-            assertNotEquals("", rs.getString(1));
+            assertNotEquals("", rs.getString(2));
         }
     }
 
@@ -1066,6 +998,13 @@ public abstract class BaseTestCase {
         try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery("SELECT CURRENT_USER()")) {
             assertTrue(rs.next());
             assertEquals(user, rs.getString(1).split("@")[0]);
+        }
+    }
+
+    protected static void assertNonSecureConnection(Connection conn) throws Exception {
+        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery("SHOW STATUS LIKE 'Ssl_version'")) {
+            assertTrue(rs.next());
+            assertEquals("", rs.getString(2));
         }
     }
 
@@ -1099,7 +1038,7 @@ public abstract class BaseTestCase {
     /**
      * Retrieve the current system time in milliseconds, using the nanosecond
      * time if possible.
-     * 
+     *
      * @return current time in milliseconds
      */
     protected static final long currentTimeMillis() {
@@ -1254,6 +1193,7 @@ public abstract class BaseTestCase {
     }
 
     public static class MockConnectionConfiguration {
+
         String hostName;
         String port;
         String serverType;
@@ -1268,7 +1208,7 @@ public abstract class BaseTestCase {
 
         public String getAddress(boolean withTrailingPort) {
             return "address=(protocol=tcp)(host=" + this.hostName + ")(port=" + this.port + ")(type=" + this.serverType + ")"
-                    + (withTrailingPort ? (":" + this.port) : "");
+                    + (withTrailingPort ? ":" + this.port : "");
         }
 
         public String getAddress() {
@@ -1278,6 +1218,7 @@ public abstract class BaseTestCase {
         public String getHostPortPair() {
             return this.hostName + ":" + this.port;
         }
+
     }
 
     protected ReplicationConnection getUnreliableReplicationConnection(Set<MockConnectionConfiguration> configs, Properties props) throws Exception {
@@ -1298,7 +1239,7 @@ public abstract class BaseTestCase {
             hostString.append(glue);
             glue = ",";
             if (config.port == null) {
-                config.port = (port == null ? "3306" : port);
+                config.port = port == null ? "3306" : port;
             }
             hostString.append(config.getAddress());
             if (config.isDowned) {
@@ -1324,4 +1265,66 @@ public abstract class BaseTestCase {
         }
         return res;
     }
+
+    protected boolean supportsTimeZoneNames(Statement st) throws Exception {
+        ResultSet rs1 = st.executeQuery("SELECT COUNT(*) FROM mysql.time_zone_name");
+        return rs1.next() && rs1.getInt(1) > 0;
+    }
+
+    protected boolean supportsLoadLocalInfile(Statement st) throws Exception {
+        ResultSet rs1 = st.executeQuery("SHOW VARIABLES LIKE 'local_infile'");
+        return rs1.next() && "ON".equalsIgnoreCase(rs1.getString(2));
+    }
+
+    protected boolean supportsTestCertificates(Statement st) throws Exception {
+        ResultSet rs1 = st.executeQuery("SHOW VARIABLES LIKE 'ssl_ca'");
+        return rs1.next() && rs1.getString(2).contains("ssl-test-certs");
+    }
+
+    protected boolean supportsTestSha256PasswordKeys(Statement st) throws Exception {
+        ResultSet rs1 = st.executeQuery("SHOW VARIABLES LIKE 'sha256_password_public_key_path'");
+        return rs1.next() && rs1.getString(2).contains("ssl-test-certs");
+    }
+
+    protected boolean supportsTestCachingSha2PasswordKeys(Statement st) throws Exception {
+        ResultSet rs1 = st.executeQuery("SHOW VARIABLES LIKE 'caching_sha2_password_private_key_path'");
+        return rs1.next() && rs1.getString(2).contains("ssl-test-certs");
+    }
+
+    protected boolean supportsTLSv1_2(ServerVersion version) throws Exception {
+        return version.meetsMinimum(new ServerVersion(5, 7, 28))
+                || version.meetsMinimum(new ServerVersion(5, 6, 46)) && !version.meetsMinimum(new ServerVersion(5, 7, 0))
+                || version.meetsMinimum(new ServerVersion(5, 6, 0)) && Util.isEnterpriseEdition(version.toString());
+    }
+
+    protected String getHighestCommonTlsVersion() throws Exception {
+        // Find out which TLS protocol versions are supported by this JVM.
+        SSLContext sslContext = SSLContext.getInstance("TLS");
+        sslContext.init(null, null, null);
+        List<String> jvmSupportedProtocols = Arrays.asList(sslContext.createSSLEngine().getSupportedProtocols());
+
+        this.rs = this.stmt.executeQuery("SHOW GLOBAL VARIABLES LIKE 'tls_version'");
+        assertTrue(this.rs.next());
+        String value = this.rs.getString(2);
+
+        List<String> serverSupportedProtocols = Arrays.asList(value.trim().split("\\s*,\\s*"));
+        String highestCommonTlsVersion = "";
+        for (String p : new String[] { "TLSv1.3", "TLSv1.2", "TLSv1.1", "TLSv1" }) {
+            if (jvmSupportedProtocols.contains(p) && serverSupportedProtocols.contains(p)) {
+                highestCommonTlsVersion = p;
+                break;
+            }
+        }
+        System.out.println("Server supports TLS protocols: " + serverSupportedProtocols);
+        System.out.println("Highest common TLS protocol: " + highestCommonTlsVersion);
+
+        return highestCommonTlsVersion;
+    }
+
+    protected void assertSessionStatusEquals(Statement st, String statusVariable, String expected) throws Exception {
+        ResultSet rs1 = st.executeQuery("SHOW SESSION STATUS LIKE '" + statusVariable + "'");
+        assertTrue(rs1.next());
+        assertEquals(expected, rs1.getString(2));
+    }
+
 }

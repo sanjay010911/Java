@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -47,7 +47,6 @@ import java.text.DateFormat;
 import java.util.Calendar;
 import java.util.Properties;
 import java.util.TimeZone;
-import java.util.concurrent.Callable;
 
 import org.junit.jupiter.api.Test;
 
@@ -58,6 +57,7 @@ import com.mysql.cj.util.TimeUtil;
 import testsuite.BaseTestCase;
 
 public class DateTest extends BaseTestCase {
+
     @Test
     public void testTimestamp() throws SQLException {
         createTable("DATETEST", "(tstamp TIMESTAMP, dt DATE, dtime DATETIME, tm TIME)");
@@ -152,11 +152,9 @@ public class DateTest extends BaseTestCase {
             assertTrue(rs1.getTimestamp(1).getNanos() == 900000, rs1.getTimestamp(1).getNanos() + " != 900000");
             assertTrue(rs1.next());
 
-            assertThrows(SQLDataException.class, "Cannot convert string '1969-12-31 18:00:00.' to java.sql.Timestamp value", new Callable<Void>() {
-                public Void call() throws Exception {
-                    rs1.getTimestamp(1);
-                    return null;
-                }
+            assertThrows(SQLDataException.class, "Cannot convert string '1969-12-31 18:00:00.' to java.sql.Timestamp value", () -> {
+                rs1.getTimestamp(1);
+                return null;
             });
         } finally {
             this.stmt.executeUpdate("DROP TABLE IF EXISTS testNanosParsing");
@@ -165,7 +163,7 @@ public class DateTest extends BaseTestCase {
 
     /**
      * Tests the configurability of all-zero date/datetime/timestamp handling in the driver.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -176,6 +174,8 @@ public class DateTest extends BaseTestCase {
         Connection exceptionConn = null;
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             if (versionMeetsMinimum(5, 7, 4)) {
                 props.setProperty(PropertyKey.jdbcCompliantTruncation.getKeyName(), "false");
                 props.setProperty(PropertyKey.preserveInstants.getKeyName(), "false");
@@ -195,6 +195,8 @@ public class DateTest extends BaseTestCase {
             this.stmt.executeUpdate("INSERT INTO testZeroDateBehavior VALUES ('0000-00-00 00:00:00', '0000-00-00 00:00:00')");
 
             props.clear();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.zeroDateTimeBehavior.getKeyName(), "ROUND");
             props.setProperty(PropertyKey.preserveInstants.getKeyName(), "false");
             roundConn = getConnectionWithProps(props);
@@ -216,7 +218,11 @@ public class DateTest extends BaseTestCase {
             assertEquals("0001-01-01", this.rs.getDate(2).toString());
             assertEquals("0001-01-01 00:00:00.0", TimeUtil.getSimpleDateFormat(null, "yyyy-MM-dd HH:mm:ss.0", null).format(this.rs.getTimestamp(2)));
 
-            nullConn = getConnectionWithProps("zeroDateTimeBehavior=CONVERT_TO_NULL");
+            props.clear();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.zeroDateTimeBehavior.getKeyName(), "CONVERT_TO_NULL");
+            nullConn = getConnectionWithProps(props);
             Statement nullStmt = nullConn.createStatement();
             this.rs = nullStmt.executeQuery("SELECT fieldAsString, fieldAsDateTime FROM testZeroDateBehavior");
 
@@ -237,7 +243,11 @@ public class DateTest extends BaseTestCase {
             assertNull(this.rs.getDate(2));
             assertNull(this.rs.getTimestamp(2));
 
-            exceptionConn = getConnectionWithProps("zeroDateTimeBehavior=EXCEPTION");
+            props.clear();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.zeroDateTimeBehavior.getKeyName(), "EXCEPTION");
+            exceptionConn = getConnectionWithProps(props);
             Statement exceptionStmt = exceptionConn.createStatement();
             this.rs = exceptionStmt.executeQuery("SELECT fieldAsString, fieldAsDateTime FROM testZeroDateBehavior");
 
@@ -357,4 +367,5 @@ public class DateTest extends BaseTestCase {
         System.out.println(rs1.getTimestamp(3));
         System.out.println(rs1.getTimestamp(4));
     }
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -30,7 +30,7 @@
 package testsuite.simple;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,13 +44,14 @@ import testsuite.BaseTestCase;
 /**
  * Tests new StringUtils functions in the driver: public static String sanitizeProcOrFuncName(String src) and public static List splitDBdotName(String src,
  * String cat, String quotId, boolean isNoBslashEscSet)
- * 
+ *
  * By the time sanitizeProcOrFuncName is called we should only have DB.SP as src, ie. SP/FUNC name is already sanitized during the process!
  */
 public class SplitDBdotNameTest extends BaseTestCase {
+
     /**
      * Tests sanitation and SplitDBdotName
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -62,45 +63,34 @@ public class SplitDBdotNameTest extends BaseTestCase {
         //Test 1.1, weird DB.SP name
         src = "`MyDatabase 1.0.1.0`.`Proc 1.v1`";
         resString = StringUtils.sanitizeProcOrFuncName(src);
-        if ((resString != null)) {
-            results = StringUtils.splitDBdotName(resString, null, "`", true);
-            assertEquals(results.get(0), "MyDatabase 1.0.1.0");
-            assertEquals(results.get(1), "Proc 1.v1");
-        } else {
-            fail("Test 1.1 returned null resString");
-        }
+        assertNotNull(resString, "Test 1.1 returned null resString");
+        results = StringUtils.splitDBdotName(resString, null, "`", true);
+        assertEquals(results.get(0), "MyDatabase 1.0.1.0");
+        assertEquals(results.get(1), "Proc 1.v1");
 
         //Test 1.2, toggle isNoBslashEscSet
         src = "`MyDatabase 1.0.1.0`.`Proc 1.v1`";
         resString = StringUtils.sanitizeProcOrFuncName(src);
-        if ((resString != null)) {
-            results = StringUtils.splitDBdotName(resString, null, "`", false);
-            assertEquals(results.get(0), "MyDatabase 1.0.1.0");
-            assertEquals(results.get(1), "Proc 1.v1");
-        } else {
-            fail("Test 1.2 returned null resString");
-        }
+        assertNotNull(resString, "Test 1.2 returned null resString");
+        results = StringUtils.splitDBdotName(resString, null, "`", false);
+        assertEquals(results.get(0), "MyDatabase 1.0.1.0");
+        assertEquals(results.get(1), "Proc 1.v1");
 
         //Test 2.1, weird SP name, no DB parameter
         src = "`Proc 1.v1`";
         resString = StringUtils.sanitizeProcOrFuncName(src);
-        if ((resString != null)) {
-            results = StringUtils.splitDBdotName(resString, null, "`", true);
-            assertEquals(results.get(0), null);
-            assertEquals(results.get(1), "Proc 1.v1");
-        } else {
-            fail("Test 2.1 returned null resString");
-        }
+        assertNotNull(resString, "Test 2.1 returned null resString");
+        results = StringUtils.splitDBdotName(resString, null, "`", true);
+        assertEquals(results.get(0), null);
+        assertEquals(results.get(1), "Proc 1.v1");
 
         //Test 2.2, toggle isNoBslashEscSet
         src = "`Proc 1.v1`";
         resString = StringUtils.sanitizeProcOrFuncName(src);
-        if ((resString != null)) {
-            results = StringUtils.splitDBdotName(resString, null, "`", false);
-            assertEquals(results.get(0), null);
-            assertEquals(results.get(1), "Proc 1.v1");
-        } else {
-            fail("Test 2.2 returned null resString");
-        }
+        assertNotNull(resString, "Test 2.2 returned null resString");
+        results = StringUtils.splitDBdotName(resString, null, "`", false);
+        assertEquals(results.get(0), null);
+        assertEquals(results.get(1), "Proc 1.v1");
     }
+
 }

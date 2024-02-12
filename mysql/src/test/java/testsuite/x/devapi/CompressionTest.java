@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2020, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -73,6 +73,7 @@ import com.mysql.cj.xdevapi.Session;
 import com.mysql.cj.xdevapi.SqlResult;
 
 public class CompressionTest extends DevApiBaseTestCase {
+
     private final Properties compressFreeTestProperties = (Properties) this.testProperties.clone();
     private String compressFreeBaseUrl = this.baseUrl;
 
@@ -87,6 +88,7 @@ public class CompressionTest extends DevApiBaseTestCase {
     private CompressionCounters counters = null;
 
     private class CompressionCounters {
+
         private static final String MYSQLX_BYTES_RECEIVED = "Mysqlx_bytes_received";
         private static final String MYSQLX_BYTES_RECEIVED_COMPRESSED_PAYLOAD = "Mysqlx_bytes_received_compressed_payload";
         private static final String MYSQLX_BYTES_RECEIVED_UNCOMPRESSED_FRAME = "Mysqlx_bytes_received_uncompressed_frame";
@@ -94,8 +96,8 @@ public class CompressionTest extends DevApiBaseTestCase {
         private static final String MYSQLX_BYTES_SENT_COMPRESSED_PAYLOAD = "Mysqlx_bytes_sent_compressed_payload";
         private static final String MYSQLX_BYTES_SENT_UNCOMPRESSED_FRAME = "Mysqlx_bytes_sent_uncompressed_frame";
 
-        private final Map<String, Integer> countersMap;
-        private final Map<String, Integer> deltasMap;
+        private final Map<String, Long> countersMap;
+        private final Map<String, Long> deltasMap;
 
         private Connection conn;
 
@@ -103,8 +105,8 @@ public class CompressionTest extends DevApiBaseTestCase {
             this.countersMap = new HashMap<>();
             this.deltasMap = new HashMap<>();
             Arrays.asList(MYSQLX_BYTES_RECEIVED, MYSQLX_BYTES_RECEIVED_COMPRESSED_PAYLOAD, MYSQLX_BYTES_RECEIVED_UNCOMPRESSED_FRAME, MYSQLX_BYTES_SENT,
-                    MYSQLX_BYTES_SENT_COMPRESSED_PAYLOAD, MYSQLX_BYTES_SENT_UNCOMPRESSED_FRAME).stream().peek(e -> this.countersMap.put(e, 0))
-                    .forEach(e -> this.deltasMap.put(e, 0));
+                    MYSQLX_BYTES_SENT_COMPRESSED_PAYLOAD, MYSQLX_BYTES_SENT_UNCOMPRESSED_FRAME).stream().peek(e -> this.countersMap.put(e, 0L))
+                    .forEach(e -> this.deltasMap.put(e, 0L));
 
             // Counters must be consulted using a classic connection due to Bug#30121765.
             String classicUrl = System.getProperty(PropertyDefinitions.SYSP_testsuite_url);
@@ -125,21 +127,21 @@ public class CompressionTest extends DevApiBaseTestCase {
                 ResultSet rs = this.conn.createStatement().executeQuery(
                         "SHOW GLOBAL STATUS WHERE Variable_name IN " + this.countersMap.keySet().stream().collect(Collectors.joining("', '", "('", "')")));
                 while (rs.next()) {
-                    this.deltasMap.put(rs.getString(1), rs.getInt(2) - this.countersMap.get(rs.getString(1)));
-                    this.countersMap.put(rs.getString(1), rs.getInt(2));
+                    this.deltasMap.put(rs.getString(1), rs.getLong(2) - this.countersMap.get(rs.getString(1)));
+                    this.countersMap.put(rs.getString(1), rs.getLong(2));
                 }
             } catch (SQLException | InterruptedException e) {
                 fail(e.getMessage());
             }
-            return this.deltasMap.get(MYSQLX_BYTES_RECEIVED) > 0 || this.deltasMap.get(MYSQLX_BYTES_SENT) > 0;
+            return this.deltasMap.get(MYSQLX_BYTES_RECEIVED) > 0L || this.deltasMap.get(MYSQLX_BYTES_SENT) > 0L;
         }
 
         boolean downlinkCompressionUsed() {
-            return this.deltasMap.get(MYSQLX_BYTES_SENT_COMPRESSED_PAYLOAD) > 0;
+            return this.deltasMap.get(MYSQLX_BYTES_SENT_COMPRESSED_PAYLOAD) > 0L;
         }
 
         boolean uplinkCompressionUsed() {
-            return this.deltasMap.get(MYSQLX_BYTES_RECEIVED_COMPRESSED_PAYLOAD) > 0;
+            return this.deltasMap.get(MYSQLX_BYTES_RECEIVED_COMPRESSED_PAYLOAD) > 0L;
         }
 
         boolean usedCompression() {
@@ -153,11 +155,13 @@ public class CompressionTest extends DevApiBaseTestCase {
                 fail(e.getMessage());
             }
         }
+
     }
 
     private CompressionSettings compressionSettings = null;
 
     private class CompressionSettings {
+
         private final boolean serverSupportsCompression;
         private final String compressionAlgorithms;
 
@@ -181,33 +185,40 @@ public class CompressionTest extends DevApiBaseTestCase {
         void resetCompressionSettings() {
             setCompressionAlgorithms(this.compressionAlgorithms);
         }
+
     }
 
     public static class TestInflaterInputStream extends InflaterInputStream {
+
         public static boolean instantiatedAtLeastOnce = false;
 
         public TestInflaterInputStream(InputStream in) {
             super(in);
             instantiatedAtLeastOnce = true;
         }
+
     }
 
     public static class TestSyncFlushDeflaterOutputStream extends SyncFlushDeflaterOutputStream {
+
         public static boolean instantiatedAtLeastOnce = false;
 
         public TestSyncFlushDeflaterOutputStream(OutputStream out) {
             super(out);
             instantiatedAtLeastOnce = true;
         }
+
     }
 
     public static class TestInputStream extends FilterInputStream {
+
         public static boolean instantiatedAtLeastOnce = false;
 
         public TestInputStream(InputStream in) {
             super(in);
             instantiatedAtLeastOnce = true;
         }
+
     }
 
     private String compressionAlgorithmAgreed(Session sess) {
@@ -229,6 +240,7 @@ public class CompressionTest extends DevApiBaseTestCase {
 
     @BeforeEach
     public void setupCompressionTest() {
+        assumeTrue(this.isSetForXTests, PropertyDefinitions.SYSP_testsuite_url_mysqlx + " must be set to run this test.");
         if (setupTestSession()) {
             this.compressFreeTestProperties.remove(PropertyKey.xdevapiCompression.getKeyName());
             this.compressFreeTestProperties.remove(PropertyKey.xdevapiCompressionAlgorithms.getKeyName());
@@ -265,7 +277,7 @@ public class CompressionTest extends DevApiBaseTestCase {
      */
     @Test
     public void compressionNegotiationServerSideRestricted() {
-        assumeTrue(this.isSetForXTests && this.compressionSettings.serverSupportsCompression());
+        assumeTrue(this.compressionSettings.serverSupportsCompression(), "Server variable mysqlx_compression_algorithms must be configured to run this test.");
 
         String[] algorithms = new String[] { "", "zstd_stream", "lz4_message", "deflate_stream" };
         boolean[] expected = new boolean[] { false, false, false, true }; // Only "deflate_stream" is supported by default.
@@ -320,7 +332,7 @@ public class CompressionTest extends DevApiBaseTestCase {
      */
     @Test
     public void compressionNegotiationClientSideSelectionNativelySupported() {
-        assumeTrue(this.isSetForXTests && this.compressionSettings.serverSupportsCompression());
+        assumeTrue(this.compressionSettings.serverSupportsCompression(), "Server variable mysqlx_compression_algorithms must be configured to run this test.");
 
         /*
          * Default negotiation is always "deflate_stream" as only "deflate_stream" is supported by default.
@@ -333,7 +345,6 @@ public class CompressionTest extends DevApiBaseTestCase {
             assertEquals("deflate_stream", compressionAlgorithmAgreed(testSession));
             testSession.close();
         }
-
     }
 
     /**
@@ -343,7 +354,7 @@ public class CompressionTest extends DevApiBaseTestCase {
      */
     @Test
     public void compressionNegotiationClientSideSelectionOtherThanNative() {
-        assumeTrue(this.isSetForXTests && this.compressionSettings.serverSupportsCompression());
+        assumeTrue(this.compressionSettings.serverSupportsCompression(), "Server variable mysqlx_compression_algorithms must be configured to run this test.");
 
         String[] algorithmsOpts = new String[] { "zstd_stream,lz4_message,deflate_stream", "lz4_message,zstd_stream,deflate_stream" };
         for (String algorithms : algorithmsOpts) {
@@ -366,7 +377,7 @@ public class CompressionTest extends DevApiBaseTestCase {
      */
     @Test
     public void compressionNegotiationClientSideSelectionUnknownIds() {
-        assumeTrue(this.isSetForXTests && this.compressionSettings.serverSupportsCompression());
+        assumeTrue(this.compressionSettings.serverSupportsCompression(), "Server variable mysqlx_compression_algorithms must be configured to run this test.");
 
         String[] algorithmsOpts = new String[] { "foo_message,bar_stream,deflate_stream", "foo_message,deflate_stream,bar_stream",
                 "deflate_stream,foo_message,bar_stream" };
@@ -385,7 +396,7 @@ public class CompressionTest extends DevApiBaseTestCase {
      */
     @Test
     public void compressionNegotiationClientSideSelectionNoCommon() {
-        assumeTrue(this.isSetForXTests && this.compressionSettings.serverSupportsCompression());
+        assumeTrue(this.compressionSettings.serverSupportsCompression(), "Server variable mysqlx_compression_algorithms must be configured to run this test.");
 
         String[] algorithmsOpts = new String[] { "", "foo_message,bar_stream" };
         for (String algorithms : algorithmsOpts) {
@@ -427,7 +438,7 @@ public class CompressionTest extends DevApiBaseTestCase {
      */
     @Test
     public void compressionDisabled() {
-        assumeTrue(this.isSetForXTests && this.compressionSettings.serverSupportsCompression());
+        assumeTrue(this.compressionSettings.serverSupportsCompression(), "Server variable mysqlx_compression_algorithms must be configured to run this test.");
 
         dropCollection("compressionDisabled");
         this.schema.createCollection("compressionDisabled");
@@ -464,7 +475,7 @@ public class CompressionTest extends DevApiBaseTestCase {
      */
     @Test
     public void downlinkCompression() {
-        assumeTrue(this.isSetForXTests && this.compressionSettings.serverSupportsCompression());
+        assumeTrue(this.compressionSettings.serverSupportsCompression(), "Server variable mysqlx_compression_algorithms must be configured to run this test.");
 
         dropCollection("downlinkCompression");
         this.schema.createCollection("downlinkCompression");
@@ -506,7 +517,7 @@ public class CompressionTest extends DevApiBaseTestCase {
      */
     @Test
     public void uplinkCompression() {
-        assumeTrue(this.isSetForXTests && this.compressionSettings.serverSupportsCompression());
+        assumeTrue(this.compressionSettings.serverSupportsCompression(), "Server variable mysqlx_compression_algorithms must be configured to run this test.");
 
         dropCollection("uplinkCompression");
 
@@ -549,7 +560,7 @@ public class CompressionTest extends DevApiBaseTestCase {
      */
     @Test
     public void compressionThreshold() {
-        assumeTrue(this.isSetForXTests && this.compressionSettings.serverSupportsCompression());
+        assumeTrue(this.compressionSettings.serverSupportsCompression(), "Server variable mysqlx_compression_algorithms must be configured to run this test.");
 
         dropCollection("compressionThreshold");
         this.schema.createCollection("compressionThreshold");
@@ -600,7 +611,7 @@ public class CompressionTest extends DevApiBaseTestCase {
      */
     @Test
     public void invalidCompressionOptions() {
-        assumeTrue(this.isSetForXTests && this.compressionSettings.serverSupportsCompression());
+        assumeTrue(this.compressionSettings.serverSupportsCompression(), "Server variable mysqlx_compression_algorithms must be configured to run this test.");
 
         assertThrows(WrongArgumentException.class,
                 "The connection property 'xdevapi.compression' acceptable values are: 'DISABLED', 'PREFERRED' or 'REQUIRED'\\. The value 'true' is not acceptable\\.",
@@ -682,7 +693,7 @@ public class CompressionTest extends DevApiBaseTestCase {
      */
     @Test
     public void validCompressionExtensionsOption() {
-        assumeTrue(this.isSetForXTests && this.compressionSettings.serverSupportsCompression());
+        assumeTrue(this.compressionSettings.serverSupportsCompression(), "Server variable mysqlx_compression_algorithms must be configured to run this test.");
 
         dropCollection("validCompressionAlgorithmOption");
         this.schema.createCollection("validCompressionAlgorithmOption");
@@ -725,7 +736,7 @@ public class CompressionTest extends DevApiBaseTestCase {
      */
     @Test
     public void compressionNegotiationClientSideSelectionWithAliases() {
-        assumeTrue(this.isSetForXTests && this.compressionSettings.serverSupportsCompression());
+        assumeTrue(this.compressionSettings.serverSupportsCompression(), "Server variable mysqlx_compression_algorithms must be configured to run this test.");
 
         Session testSession = this.fact.getSession(this.compressFreeBaseUrl + makeParam(PropertyKey.xdevapiCompressionAlgorithms, "zstd,lz4,deflate")
                 + makeParam(PropertyKey.xdevapiCompressionExtensions,
@@ -784,15 +795,15 @@ public class CompressionTest extends DevApiBaseTestCase {
 
     /**
      * Test fix for Bug#99708 (31510398), mysql-connector-java 8.0.20 ASSERTION FAILED: Unknown message type: 57 s.close.
-     * 
+     *
      * This test is not entirely deterministic, since it depends on the size of the compressed data returned from the server. Observations showed that it fails
      * in pretty close to 100% of executions.
-     * 
+     *
      * The test fails by throwing an exception.
      */
     @Test
     public void testBug99708() {
-        assumeTrue(this.isSetForXTests && this.compressionSettings.serverSupportsCompression());
+        assumeTrue(this.compressionSettings.serverSupportsCompression(), "Server variable mysqlx_compression_algorithms must be configured to run this test.");
 
         try {
             dropCollection("testBug99708");
@@ -814,4 +825,5 @@ public class CompressionTest extends DevApiBaseTestCase {
             dropCollection("testBug99708");
         }
     }
+
 }

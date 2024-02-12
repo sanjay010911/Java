@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -55,6 +55,7 @@ public class NativeServerSession implements ServerSession {
     public static final int SERVER_STATUS_CURSOR_EXISTS = 64;
     public static final int SERVER_STATUS_LAST_ROW_SENT = 128; // The server status for 'last-row-sent'
     public static final int SERVER_QUERY_WAS_SLOW = 2048;
+    public static final int SERVER_SESSION_STATE_CHANGED = 1 << 14; // 16384
 
     public static final int CLIENT_LONG_PASSWORD = 0x00000001; /* new more secure passwords */
     public static final int CLIENT_FOUND_ROWS = 0x00000002;
@@ -78,6 +79,7 @@ public class NativeServerSession implements ServerSession {
     public static final int CLIENT_SESSION_TRACK = 0x00800000;
     public static final int CLIENT_DEPRECATE_EOF = 0x01000000;
     public static final int CLIENT_QUERY_ATTRIBUTES = 0x08000000;
+    public static final int CLIENT_MULTI_FACTOR_AUTHENTICATION = 0x10000000;
 
     private PropertySet propertySet;
     private NativeCapabilities capabilities;
@@ -129,20 +131,12 @@ public class NativeServerSession implements ServerSession {
 
     @Override
     public void setStatusFlags(int statusFlags, boolean saveOldStatus) {
-        if (saveOldStatus) {
-            this.oldStatusFlags = this.statusFlags;
-        }
+        int currentStatusFlags = this.statusFlags;
         this.statusFlags = statusFlags;
-    }
-
-    @Override
-    public int getOldStatusFlags() {
-        return this.oldStatusFlags;
-    }
-
-    @Override
-    public void setOldStatusFlags(int oldStatusFlags) {
-        this.oldStatusFlags = oldStatusFlags;
+        if (saveOldStatus) {
+            this.oldStatusFlags = currentStatusFlags;
+            preserveOldTransactionState();
+        }
     }
 
     @Override
@@ -220,6 +214,11 @@ public class NativeServerSession implements ServerSession {
     }
 
     @Override
+    public boolean isSessionStateTrackingEnabled() {
+        return (this.clientParam & CLIENT_SESSION_TRACK) != 0;
+    }
+
+    @Override
     public boolean isEOFDeprecated() {
         return (this.clientParam & CLIENT_DEPRECATE_EOF) != 0;
     }
@@ -242,7 +241,7 @@ public class NativeServerSession implements ServerSession {
     @Override
     public int getServerVariable(String variableName, int fallbackValue) {
         try {
-            return Integer.valueOf(getServerVariable(variableName));
+            return Integer.parseInt(getServerVariable(variableName));
         } catch (NumberFormatException nfe) {
             //getLog().logWarn(
             //        Messages.getString("Connection.BadValueInServerVariables", new Object[] { variableName, getServerVariable(variableName), fallbackValue }));
@@ -255,6 +254,7 @@ public class NativeServerSession implements ServerSession {
         this.serverVariables = serverVariables;
     }
 
+    @Override
     public final ServerVersion getServerVersion() {
         return this.capabilities.getServerVersion();
     }
@@ -266,7 +266,7 @@ public class NativeServerSession implements ServerSession {
 
     /**
      * Should SET AUTOCOMMIT be sent to server if we are going to set autoCommitFlag in driver
-     * 
+     *
      * @param autoCommitFlag
      *            autocommit status we are going to set in driver
      * @param elideSetAutoCommitsFlag
@@ -307,20 +307,23 @@ public class NativeServerSession implements ServerSession {
         return "1".equalsIgnoreCase(lowerCaseTables) || "on".equalsIgnoreCase(lowerCaseTables);
     }
 
+    @Override
     public boolean isQueryCacheEnabled() {
         return "ON".equalsIgnoreCase(this.serverVariables.get("query_cache_type")) && !"0".equalsIgnoreCase(this.serverVariables.get("query_cache_size"));
     }
 
     /**
      * Is the server in a sql_mode that does not allow us to use \\ to escape things?
-     * 
+     *
      * @return Returns the noBackslashEscapes.
      */
+    @Override
     public boolean isNoBackslashEscapesSet() {
         String sqlModeAsString = this.serverVariables.get("sql_mode");
         return sqlModeAsString != null && sqlModeAsString.indexOf("NO_BACKSLASH_ESCAPES") != -1;
     }
 
+    @Override
     public boolean useAnsiQuotedIdentifiers() {
         String sqlModeAsString = this.serverVariables.get("sql_mode");
         return sqlModeAsString != null && sqlModeAsString.indexOf("ANSI_QUOTES") != -1;
@@ -332,14 +335,17 @@ public class NativeServerSession implements ServerSession {
         return sqlModeAsString != null && sqlModeAsString.indexOf("TIME_TRUNCATE_FRACTIONAL") != -1;
     }
 
+    @Override
     public boolean isAutoCommit() {
         return this.autoCommit;
     }
 
+    @Override
     public void setAutoCommit(boolean autoCommit) {
         this.autoCommit = autoCommit;
     }
 
+    @Override
     public TimeZone getSessionTimeZone() {
         if (this.sessionTimeZone == null) {
             String configuredTimeZoneOnServer = getServerVariable("time_zone");
@@ -358,10 +364,12 @@ public class NativeServerSession implements ServerSession {
         return this.sessionTimeZone;
     }
 
+    @Override
     public void setSessionTimeZone(TimeZone sessionTimeZone) {
         this.sessionTimeZone = sessionTimeZone;
     }
 
+    @Override
     public TimeZone getDefaultTimeZone() {
         if (this.cacheDefaultTimeZone.getValue()) {
             return this.defaultTimeZone;
@@ -383,4 +391,5 @@ public class NativeServerSession implements ServerSession {
     public void setCharsetSettings(CharsetSettings charsetSettings) {
         this.charsetSettings = charsetSettings;
     }
+
 }

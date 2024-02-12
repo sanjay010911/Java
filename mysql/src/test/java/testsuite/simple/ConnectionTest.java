@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -33,9 +33,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.BufferedInputStream;
@@ -62,7 +62,6 @@ import java.sql.DriverManager;
 import java.sql.ParameterMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.SQLSyntaxErrorException;
 import java.sql.Savepoint;
@@ -76,13 +75,9 @@ import java.util.Enumeration;
 import java.util.List;
 import java.util.Properties;
 import java.util.Random;
-import java.util.concurrent.Callable;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.mysql.cj.CharsetMappingWrapper;
@@ -95,12 +90,10 @@ import com.mysql.cj.conf.PropertyDefinitions;
 import com.mysql.cj.conf.PropertyDefinitions.DatabaseTerm;
 import com.mysql.cj.conf.PropertyDefinitions.SslMode;
 import com.mysql.cj.conf.PropertyKey;
-import com.mysql.cj.exceptions.ExceptionFactory;
 import com.mysql.cj.exceptions.InvalidConnectionAttributeException;
 import com.mysql.cj.exceptions.MysqlErrorNumbers;
 import com.mysql.cj.jdbc.ClientPreparedStatement;
 import com.mysql.cj.jdbc.JdbcConnection;
-import com.mysql.cj.jdbc.JdbcPropertySet;
 import com.mysql.cj.jdbc.MysqlConnectionPoolDataSource;
 import com.mysql.cj.jdbc.NonRegisteringDriver;
 import com.mysql.cj.jdbc.exceptions.CommunicationsException;
@@ -113,6 +106,7 @@ import com.mysql.cj.protocol.a.MultiPacketReader;
 import com.mysql.cj.protocol.a.NativePacketHeader;
 import com.mysql.cj.protocol.a.NativePacketPayload;
 import com.mysql.cj.protocol.a.NativeProtocol;
+import com.mysql.cj.protocol.a.NativeServerSession;
 import com.mysql.cj.protocol.a.SimplePacketReader;
 import com.mysql.cj.protocol.a.SimplePacketSender;
 import com.mysql.cj.protocol.a.TimeTrackingPacketReader;
@@ -132,54 +126,10 @@ import testsuite.TestUtils;
  * Tests java.sql.Connection functionality
  */
 public class ConnectionTest extends BaseTestCase {
-    private String sslFreeBaseUrl = "";
-
-    @BeforeEach
-    public void setupSecureSessionTest() {
-        System.clearProperty("javax.net.ssl.trustStore");
-        System.clearProperty("javax.net.ssl.trustStoreType");
-        System.clearProperty("javax.net.ssl.trustStorePassword");
-
-        this.sslFreeBaseUrl = dbUrl;
-        this.sslFreeBaseUrl = this.sslFreeBaseUrl.replaceAll(PropertyKey.sslMode.getKeyName() + "=", PropertyKey.sslMode.getKeyName() + "VOID=");
-        this.sslFreeBaseUrl = this.sslFreeBaseUrl.replaceAll(PropertyKey.trustCertificateKeyStoreUrl.getKeyName() + "=",
-                PropertyKey.trustCertificateKeyStoreUrl.getKeyName() + "VOID=");
-        this.sslFreeBaseUrl = this.sslFreeBaseUrl.replaceAll(PropertyKey.trustCertificateKeyStoreType.getKeyName() + "=",
-                PropertyKey.trustCertificateKeyStoreType.getKeyName() + "VOID=");
-        this.sslFreeBaseUrl = this.sslFreeBaseUrl.replaceAll(PropertyKey.trustCertificateKeyStorePassword.getKeyName() + "=",
-                PropertyKey.trustCertificateKeyStorePassword.getKeyName() + "VOID=");
-        this.sslFreeBaseUrl = this.sslFreeBaseUrl.replaceAll(PropertyKey.fallbackToSystemTrustStore.getKeyName() + "=",
-                PropertyKey.fallbackToSystemTrustStore.getKeyName() + "VOID=");
-        this.sslFreeBaseUrl = this.sslFreeBaseUrl.replaceAll(PropertyKey.clientCertificateKeyStoreUrl.getKeyName() + "=",
-                PropertyKey.clientCertificateKeyStoreUrl.getKeyName() + "VOID=");
-        this.sslFreeBaseUrl = this.sslFreeBaseUrl.replaceAll(PropertyKey.clientCertificateKeyStoreType.getKeyName() + "=",
-                PropertyKey.clientCertificateKeyStoreType.getKeyName() + "VOID=");
-        this.sslFreeBaseUrl = this.sslFreeBaseUrl.replaceAll(PropertyKey.clientCertificateKeyStorePassword.getKeyName() + "=",
-                PropertyKey.clientCertificateKeyStorePassword.getKeyName() + "VOID=");
-        this.sslFreeBaseUrl = this.sslFreeBaseUrl.replaceAll(PropertyKey.fallbackToSystemKeyStore.getKeyName() + "=",
-                PropertyKey.fallbackToSystemKeyStore.getKeyName() + "VOID=");
-        this.sslFreeBaseUrl = this.sslFreeBaseUrl.replaceAll(PropertyKey.xdevapiTlsCiphersuites.getKeyName() + "=",
-                PropertyKey.xdevapiTlsCiphersuites.getKeyName() + "VOID=");
-        this.sslFreeBaseUrl = this.sslFreeBaseUrl.replaceAll(PropertyKey.xdevapiTlsVersions.getKeyName() + "=",
-                PropertyKey.xdevapiTlsVersions.getKeyName() + "VOID=");
-        if (!this.sslFreeBaseUrl.contains("?")) {
-            this.sslFreeBaseUrl += "?";
-        }
-    }
-
-    @AfterEach
-    public void teardownConnectionTest() {
-        System.clearProperty("javax.net.ssl.trustStore");
-        System.clearProperty("javax.net.ssl.trustStoreType");
-        System.clearProperty("javax.net.ssl.trustStorePassword");
-        System.clearProperty("javax.net.ssl.keyStore");
-        System.clearProperty("javax.net.ssl.keyStoreType");
-        System.clearProperty("javax.net.ssl.keyStorePassword");
-    }
 
     /**
      * Tests catalog functionality
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -197,69 +147,70 @@ public class ConnectionTest extends BaseTestCase {
 
     /**
      * Tests a cluster connection for failover, requires a two-node cluster URL specified in com.mysql.jdbc.testsuite.ClusterUrl system property.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testClusterConnection() throws Exception {
         String url = System.getProperty(PropertyDefinitions.SYSP_testsuite_url_cluster);
 
-        if ((url != null) && (url.length() > 0)) {
-            Object versionNumObj = getSingleValueWithQuery("SHOW VARIABLES LIKE 'version'");
+        assumeTrue(url != null && url.length() > 0,
+                "This test requires a two-node cluster URL specified in " + PropertyDefinitions.SYSP_testsuite_url_cluster + " system property");
 
-            if ((versionNumObj != null) && (versionNumObj.toString().indexOf("cluster") != -1)) {
-                Connection clusterConn = null;
-                Statement clusterStmt = null;
+        Object versionNumObj = getSingleValueWithQuery("SHOW VARIABLES LIKE 'version'");
+
+        if (versionNumObj != null && versionNumObj.toString().indexOf("cluster") != -1) {
+            Connection clusterConn = null;
+            Statement clusterStmt = null;
+
+            try {
+                clusterConn = new NonRegisteringDriver().connect(url, null);
+
+                clusterStmt = clusterConn.createStatement();
+                clusterStmt.executeUpdate("DROP TABLE IF EXISTS testClusterConn");
+                clusterStmt.executeUpdate("CREATE TABLE testClusterConn (field1 INT) ENGINE=ndbcluster");
+                clusterStmt.executeUpdate("INSERT INTO testClusterConn VALUES (1)");
+
+                clusterConn.setAutoCommit(false);
+
+                clusterStmt.execute("SELECT * FROM testClusterConn");
+                clusterStmt.executeUpdate("UPDATE testClusterConn SET field1=4");
+
+                // Kill the connection
+                @SuppressWarnings("unused")
+                String connectionId = getSingleValueWithQuery("SELECT CONNECTION_ID()").toString();
+
+                System.out.println("Please kill the MySQL server now and press return...");
+                System.in.read();
+
+                System.out.println("Waiting for TCP/IP timeout...");
+                Thread.sleep(10);
+
+                System.out.println("Attempting auto reconnect");
 
                 try {
-                    clusterConn = new NonRegisteringDriver().connect(url, null);
-
-                    clusterStmt = clusterConn.createStatement();
-                    clusterStmt.executeUpdate("DROP TABLE IF EXISTS testClusterConn");
-                    clusterStmt.executeUpdate("CREATE TABLE testClusterConn (field1 INT) ENGINE=ndbcluster");
-                    clusterStmt.executeUpdate("INSERT INTO testClusterConn VALUES (1)");
-
+                    clusterConn.setAutoCommit(true);
                     clusterConn.setAutoCommit(false);
+                } catch (SQLException sqlEx) {
+                    System.out.println(sqlEx);
+                }
 
-                    clusterStmt.execute("SELECT * FROM testClusterConn");
-                    clusterStmt.executeUpdate("UPDATE testClusterConn SET field1=4");
+                //
+                // Test that this 'new' connection is not read-only
+                //
+                clusterStmt.executeUpdate("UPDATE testClusterConn SET field1=5");
 
-                    // Kill the connection
-                    @SuppressWarnings("unused")
-                    String connectionId = getSingleValueWithQuery("SELECT CONNECTION_ID()").toString();
+                ResultSet rset = clusterStmt.executeQuery("SELECT * FROM testClusterConn WHERE field1=5");
 
-                    System.out.println("Please kill the MySQL server now and press return...");
-                    System.in.read();
+                assertTrue(rset.next(), "One row should be returned");
+            } finally {
+                if (clusterStmt != null) {
+                    clusterStmt.executeUpdate("DROP TABLE IF EXISTS testClusterConn");
+                    clusterStmt.close();
+                }
 
-                    System.out.println("Waiting for TCP/IP timeout...");
-                    Thread.sleep(10);
-
-                    System.out.println("Attempting auto reconnect");
-
-                    try {
-                        clusterConn.setAutoCommit(true);
-                        clusterConn.setAutoCommit(false);
-                    } catch (SQLException sqlEx) {
-                        System.out.println(sqlEx);
-                    }
-
-                    //
-                    // Test that this 'new' connection is not read-only
-                    //
-                    clusterStmt.executeUpdate("UPDATE testClusterConn SET field1=5");
-
-                    ResultSet rset = clusterStmt.executeQuery("SELECT * FROM testClusterConn WHERE field1=5");
-
-                    assertTrue(rset.next(), "One row should be returned");
-                } finally {
-                    if (clusterStmt != null) {
-                        clusterStmt.executeUpdate("DROP TABLE IF EXISTS testClusterConn");
-                        clusterStmt.close();
-                    }
-
-                    if (clusterConn != null) {
-                        clusterConn.close();
-                    }
+                if (clusterConn != null) {
+                    clusterConn.close();
                 }
             }
         }
@@ -267,7 +218,7 @@ public class ConnectionTest extends BaseTestCase {
 
     /**
      * Old test was passing due to http://bugs.mysql.com/bug.php?id=989 which is fixed for 5.5+
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -283,6 +234,8 @@ public class ConnectionTest extends BaseTestCase {
             this.conn.setAutoCommit(false);
 
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.includeInnodbStatusInDeadlockExceptions.getKeyName(), "true");
             props.setProperty(PropertyKey.includeThreadDumpInDeadlockExceptions.getKeyName(), "true");
 
@@ -315,9 +268,7 @@ public class ConnectionTest extends BaseTestCase {
             assertTrue(sqlEx.getErrorCode() == 1205);
             // Make sure INNODB Status is getting dumped into error message
 
-            if (sqlEx.getMessage().indexOf("PROCESS privilege") != -1) {
-                fail("This test requires user with process privilege");
-            }
+            assertFalse(sqlEx.getMessage().indexOf("PROCESS privilege") != -1, "This test requires user with process privilege");
 
             assertTrue(sqlEx.getMessage().indexOf("INNODB MONITOR") != -1, "Can't find INNODB MONITOR in:\n\n" + sqlEx.getMessage());
 
@@ -329,292 +280,9 @@ public class ConnectionTest extends BaseTestCase {
         }
     }
 
-    @Test
-    public void testCharsets() throws Exception {
-        Properties props = new Properties();
-        props.setProperty(PropertyKey.characterEncoding.getKeyName(), "UTF-8");
-
-        Connection utfConn = getConnectionWithProps(props);
-
-        this.stmt = utfConn.createStatement();
-
-        createTable("t1", "(comment CHAR(32) ASCII NOT NULL,koi8_ru_f CHAR(32) CHARACTER SET koi8r NOT NULL) CHARSET=latin5");
-
-        this.stmt.executeUpdate("ALTER TABLE t1 CHANGE comment comment CHAR(32) CHARACTER SET latin2 NOT NULL");
-        this.stmt.executeUpdate("ALTER TABLE t1 ADD latin5_f CHAR(32) NOT NULL");
-        this.stmt.executeUpdate("ALTER TABLE t1 CHARSET=latin2");
-        this.stmt.executeUpdate("ALTER TABLE t1 ADD latin2_f CHAR(32) NOT NULL");
-        this.stmt.executeUpdate("ALTER TABLE t1 DROP latin2_f, DROP latin5_f");
-
-        this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment) VALUES ('a','LAT SMALL A')");
-        /*
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('b','LAT SMALL B')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('c','LAT SMALL C')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('d','LAT SMALL D')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('e','LAT SMALL E')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('f','LAT SMALL F')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('g','LAT SMALL G')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('h','LAT SMALL H')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('i','LAT SMALL I')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('j','LAT SMALL J')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('k','LAT SMALL K')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('l','LAT SMALL L')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('m','LAT SMALL M')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('n','LAT SMALL N')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('o','LAT SMALL O')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('p','LAT SMALL P')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('q','LAT SMALL Q')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('r','LAT SMALL R')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('s','LAT SMALL S')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('t','LAT SMALL T')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('u','LAT SMALL U')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('v','LAT SMALL V')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('w','LAT SMALL W')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('x','LAT SMALL X')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('y','LAT SMALL Y')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('z','LAT SMALL Z')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('A','LAT CAPIT A')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('B','LAT CAPIT B')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('C','LAT CAPIT C')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('D','LAT CAPIT D')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('E','LAT CAPIT E')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('F','LAT CAPIT F')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('G','LAT CAPIT G')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('H','LAT CAPIT H')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('I','LAT CAPIT I')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('J','LAT CAPIT J')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('K','LAT CAPIT K')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('L','LAT CAPIT L')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('M','LAT CAPIT M')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('N','LAT CAPIT N')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('O','LAT CAPIT O')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('P','LAT CAPIT P')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('Q','LAT CAPIT Q')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('R','LAT CAPIT R')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('S','LAT CAPIT S')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('T','LAT CAPIT T')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('U','LAT CAPIT U')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('V','LAT CAPIT V')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('W','LAT CAPIT W')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('X','LAT CAPIT X')"); this.stmt.executeUpdate("INSERT
-         * INTO t1 (koi8_ru_f,comment) VALUES ('Y','LAT CAPIT Y')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES ('Z','LAT CAPIT Z')");
-         */
-
-        String cyrillicSmallA = "\u0430";
-        this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment) VALUES ('" + cyrillicSmallA + "','CYR SMALL A')");
-
-        /*
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL BE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL VE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL GE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL DE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL IE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL IO')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL ZHE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL ZE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL I')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL KA')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL EL')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL EM')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL EN')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL O')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL PE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL ER')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL ES')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL TE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL U')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL EF')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL HA')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL TSE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL CHE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL SHA')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL SCHA')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL HARD SIGN')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL YERU')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL SOFT SIGN')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL E')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL YU')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR SMALL YA')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT A')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT BE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT VE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT GE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT DE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT IE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT IO')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT ZHE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT ZE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT I')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT KA')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT EL')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT EM')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT EN')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT O')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT PE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT ER')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT ES')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT TE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT U')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT EF')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT HA')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT TSE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT CHE')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT SHA')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT SCHA')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT HARD SIGN')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT YERU')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT SOFT SIGN')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT E')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT YU')");
-         * this.stmt.executeUpdate("INSERT INTO t1 (koi8_ru_f,comment)
-         * VALUES (_koi8r'?��','CYR CAPIT YA')");
-         */
-
-        this.stmt.executeUpdate("ALTER TABLE t1 ADD utf8_f CHAR(32) CHARACTER SET utf8 NOT NULL");
-        this.stmt.executeUpdate("UPDATE t1 SET utf8_f=CONVERT(koi8_ru_f USING utf8)");
-        this.stmt.executeUpdate("SET CHARACTER SET koi8r");
-        // this.stmt.executeUpdate("SET CHARACTER SET UTF8");
-        this.rs = this.stmt.executeQuery("SELECT * FROM t1");
-
-        ResultSetMetaData rsmd = this.rs.getMetaData();
-
-        int numColumns = rsmd.getColumnCount();
-
-        for (int i = 0; i < numColumns; i++) {
-            System.out.print(rsmd.getColumnName(i + 1));
-            System.out.print("\t\t");
-        }
-
-        System.out.println();
-
-        while (this.rs.next()) {
-            System.out.println(this.rs.getString(1) + "\t\t" + this.rs.getString(2) + "\t\t" + this.rs.getString(3));
-
-            if (this.rs.getString(1).equals("CYR SMALL A")) {
-                this.rs.getString(2);
-            }
-        }
-
-        System.out.println();
-
-        this.stmt.executeUpdate("SET NAMES utf8");
-        this.rs = this.stmt.executeQuery("SELECT _koi8r 0xC1;");
-
-        rsmd = this.rs.getMetaData();
-
-        numColumns = rsmd.getColumnCount();
-
-        for (int i = 0; i < numColumns; i++) {
-            System.out.print(rsmd.getColumnName(i + 1));
-            System.out.print("\t\t");
-        }
-
-        System.out.println();
-
-        while (this.rs.next()) {
-            System.out.println(this.rs.getString(1).equals("\u0430") + "\t\t");
-            System.out.println(new String(this.rs.getBytes(1), "KOI8_R"));
-
-        }
-
-        char[] c = new char[] { 0xd0b0 };
-
-        System.out.println(new String(c));
-        System.out.println("\u0430");
-    }
-
     /**
      * Tests isolation level functionality
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -649,103 +317,70 @@ public class ConnectionTest extends BaseTestCase {
 
     /**
      * Tests the savepoint functionality in MySQL.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testSavepoint() throws Exception {
-        DatabaseMetaData dbmd = this.conn.getMetaData();
-
-        if (dbmd.supportsSavepoints()) {
-            System.out.println("Testing SAVEPOINTs");
-
-            try {
-                this.conn.setAutoCommit(true);
-
-                createTable("testSavepoints", "(field1 int)", "InnoDB");
-
-                // Try with named save points
-                this.conn.setAutoCommit(false);
-                this.stmt.executeUpdate("INSERT INTO testSavepoints VALUES (1)");
-
-                Savepoint afterInsert = this.conn.setSavepoint("afterInsert");
-                this.stmt.executeUpdate("UPDATE testSavepoints SET field1=2");
-
-                Savepoint afterUpdate = this.conn.setSavepoint("afterUpdate");
-                this.stmt.executeUpdate("DELETE FROM testSavepoints");
-
-                assertTrue(getRowCount("testSavepoints") == 0, "Row count should be 0");
-                this.conn.rollback(afterUpdate);
-                assertTrue(getRowCount("testSavepoints") == 1, "Row count should be 1");
-                assertTrue("2".equals(getSingleValue("testSavepoints", "field1", null).toString()), "Value should be 2");
-                this.conn.rollback(afterInsert);
-                assertTrue("1".equals(getSingleValue("testSavepoints", "field1", null).toString()), "Value should be 1");
-                this.conn.rollback();
-                assertTrue(getRowCount("testSavepoints") == 0, "Row count should be 0");
-
-                // Try with 'anonymous' save points
-                this.conn.rollback();
-
-                this.stmt.executeUpdate("INSERT INTO testSavepoints VALUES (1)");
-                afterInsert = this.conn.setSavepoint();
-                this.stmt.executeUpdate("UPDATE testSavepoints SET field1=2");
-                afterUpdate = this.conn.setSavepoint();
-                this.stmt.executeUpdate("DELETE FROM testSavepoints");
-
-                assertTrue(getRowCount("testSavepoints") == 0, "Row count should be 0");
-                this.conn.rollback(afterUpdate);
-                assertTrue(getRowCount("testSavepoints") == 1, "Row count should be 1");
-                assertTrue("2".equals(getSingleValue("testSavepoints", "field1", null).toString()), "Value should be 2");
-                this.conn.rollback(afterInsert);
-                assertTrue("1".equals(getSingleValue("testSavepoints", "field1", null).toString()), "Value should be 1");
-                this.conn.rollback();
-
-                this.conn.releaseSavepoint(this.conn.setSavepoint());
-            } finally {
-                this.conn.setAutoCommit(true);
-            }
-        } else {
-            System.out.println("MySQL version does not support SAVEPOINTs");
-        }
-    }
-
-    /**
-     * Tests the ability to set the connection collation via properties.
-     * 
-     * @throws Exception
-     */
-    @Test
-    public void testNonStandardConnectionCollation() throws Exception {
-        String collationToSet = "utf8_bin";
-        String characterSet = "utf-8";
-
-        Properties props = new Properties();
-        props.setProperty(PropertyKey.connectionCollation.getKeyName(), collationToSet);
-        props.setProperty(PropertyKey.characterEncoding.getKeyName(), characterSet);
-
-        Connection collConn = null;
-        Statement collStmt = null;
-        ResultSet collRs = null;
+        assumeTrue(this.conn.getMetaData().supportsSavepoints(), "Savepoints not supported");
 
         try {
-            collConn = getConnectionWithProps(props);
+            this.conn.setAutoCommit(true);
 
-            collStmt = collConn.createStatement();
+            createTable("testSavepoints", "(field1 int)", "InnoDB");
 
-            collRs = collStmt.executeQuery("SHOW VARIABLES LIKE 'collation_connection'");
+            // Try with named save points
+            this.conn.setAutoCommit(false);
+            this.stmt.executeUpdate("INSERT INTO testSavepoints VALUES (1)");
 
-            assertTrue(collRs.next());
-            assertTrue(collationToSet.equalsIgnoreCase(collRs.getString(2)));
+            Savepoint afterInsert = this.conn.setSavepoint("afterInsert");
+            this.stmt.executeUpdate("UPDATE testSavepoints SET field1=2");
+
+            Savepoint afterUpdate = this.conn.setSavepoint("afterUpdate");
+            this.stmt.executeUpdate("DELETE FROM testSavepoints");
+
+            assertEquals(0, getRowCount("testSavepoints"), "Row count should be 0");
+            this.conn.rollback(afterUpdate);
+            assertEquals(1, getRowCount("testSavepoints"), "Row count should be 1");
+            assertEquals("2", getSingleValue("testSavepoints", "field1", null).toString(), "Value should be 2");
+            this.conn.rollback(afterInsert);
+            assertEquals("1", getSingleValue("testSavepoints", "field1", null).toString(), "Value should be 1");
+            this.conn.rollback();
+            assertEquals(0, getRowCount("testSavepoints"), "Row count should be 0");
+
+            // Try with 'anonymous' save points
+            this.conn.rollback();
+
+            this.stmt.executeUpdate("INSERT INTO testSavepoints VALUES (1)");
+            afterInsert = this.conn.setSavepoint();
+            this.stmt.executeUpdate("UPDATE testSavepoints SET field1=2");
+            afterUpdate = this.conn.setSavepoint();
+            this.stmt.executeUpdate("DELETE FROM testSavepoints");
+
+            assertEquals(0, getRowCount("testSavepoints"), "Row count should be 0");
+            this.conn.rollback(afterUpdate);
+            assertEquals(1, getRowCount("testSavepoints"), "Row count should be 1");
+            assertEquals("2", getSingleValue("testSavepoints", "field1", null).toString(), "Value should be 2");
+            this.conn.rollback(afterInsert);
+            assertEquals("1", getSingleValue("testSavepoints", "field1", null).toString(), "Value should be 1");
+            this.conn.rollback();
+
+            Savepoint savepoint = this.conn.setSavepoint();
+            this.conn.releaseSavepoint(savepoint);
+            assertThrows(SQLException.class, "SAVEPOINT .* does not exist", () -> {
+                this.conn.rollback(savepoint);
+                return null;
+            });
         } finally {
-            if (collConn != null) {
-                collConn.close();
-            }
+            this.conn.setAutoCommit(true);
         }
     }
 
     @Test
     public void testDumpQueriesOnException() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.dumpQueriesOnException.getKeyName(), "true");
         String bogusSQL = "SELECT 1 TO BAZ";
         Connection dumpConn = getConnectionWithProps(props);
@@ -782,7 +417,7 @@ public class ConnectionTest extends BaseTestCase {
 
     /**
      * Tests functionality of the ConnectionPropertiesTransform interface.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -800,11 +435,13 @@ public class ConnectionTest extends BaseTestCase {
 
     /**
      * Tests functionality of using URLs in 'LOAD DATA LOCAL INFILE' statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testLocalInfileWithUrl() throws Exception {
+        assumeTrue(supportsLoadLocalInfile(this.stmt), "This test requires the server started with --local-infile=ON");
+
         File infile = File.createTempFile("foo", "txt");
         infile.deleteOnExit();
         String url = infile.toURI().toURL().toExternalForm();
@@ -816,6 +453,8 @@ public class ConnectionTest extends BaseTestCase {
         createTable("testLocalInfileWithUrl", "(field1 LONGTEXT)");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.allowLoadLocalInfile.getKeyName(), "true");
         props.setProperty(PropertyKey.allowUrlInLocalInfile.getKeyName(), "true");
 
@@ -827,7 +466,7 @@ public class ConnectionTest extends BaseTestCase {
                 ((JdbcConnection) loadConn).getServerVersion());
 
         try {
-            loadStmt.executeQuery("LOAD DATA LOCAL INFILE '" + url + "' INTO TABLE testLocalInfileWithUrl" + charset);
+            loadStmt.execute("LOAD DATA LOCAL INFILE '" + url + "' INTO TABLE testLocalInfileWithUrl" + charset);
         } catch (SQLException sqlEx) {
             sqlEx.printStackTrace();
 
@@ -859,15 +498,17 @@ public class ConnectionTest extends BaseTestCase {
         assertTrue("Test".equals(this.rs.getString(1)));
 
         try {
-            loadStmt.executeQuery("LOAD DATA LOCAL INFILE 'foo:///' INTO TABLE testLocalInfileWithUrl" + charset);
+            loadStmt.execute("LOAD DATA LOCAL INFILE 'foo:///' INTO TABLE testLocalInfileWithUrl" + charset);
         } catch (SQLException sqlEx) {
             assertTrue(sqlEx.getMessage() != null);
-            assertTrue(sqlEx.getMessage().indexOf("FileNotFoundException") != -1);
+            assertTrue(sqlEx.getMessage().indexOf(isServerRunningOnWindows() ? "IOException" : "FileNotFoundException") != -1);
         }
     }
 
     @Test
     public void testLocalInfileDisabled() throws Exception {
+        assumeTrue(supportsLoadLocalInfile(this.stmt), "This test requires the server started with --local-infile=ON");
+
         createTable("testLocalInfileDisabled", "(field1 varchar(255))");
 
         File infile = File.createTempFile("foo", "txt");
@@ -887,6 +528,8 @@ public class ConnectionTest extends BaseTestCase {
 
         // Test load local infile support enabled via client capabilities but disabled on the connector.
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.allowLoadLocalInfile.getKeyName(), "true");
         Connection loadConn = getConnectionWithProps(props);
 
@@ -912,6 +555,8 @@ public class ConnectionTest extends BaseTestCase {
     public void testServerConfigurationCache() throws Exception {
         Properties props = new Properties();
 
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.cacheServerConfiguration.getKeyName(), "true");
         props.setProperty(PropertyKey.profileSQL.getKeyName(), "true");
         props.setProperty(PropertyKey.logger.getKeyName(), BufferingLogger.class.getName());
@@ -946,13 +591,15 @@ public class ConnectionTest extends BaseTestCase {
     /**
      * Tests whether or not the configuration 'useLocalSessionState' actually prevents non-needed 'set autocommit=', 'set session transaction isolation ...'
      * and 'show variables like tx_isolation' queries.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testUseLocalSessionState() throws Exception {
         Properties props = new Properties();
 
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useLocalSessionState.getKeyName(), "true");
         props.setProperty(PropertyKey.profileSQL.getKeyName(), "true");
         props.setProperty(PropertyKey.logger.getKeyName(), BufferingLogger.class.getName());
@@ -977,14 +624,15 @@ public class ConnectionTest extends BaseTestCase {
 
     /**
      * Tests whether re-connect with non-read-only connection can happen.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testFailoverConnection() throws Exception {
-
         if (!isServerRunningOnWindows()) { // windows sockets don't work for this test
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.autoReconnect.getKeyName(), "true");
             props.setProperty(PropertyKey.failOverReadOnly.getKeyName(), "false");
 
@@ -1005,12 +653,12 @@ public class ConnectionTest extends BaseTestCase {
 
                 Thread.sleep(3000);
 
-                try {
-                    failoverConnection.createStatement().execute("SELECT 1");
-                    fail("We expect an exception here, because the connection should be gone until the reconnect code picks it up again");
-                } catch (SQLException sqlEx) {
-                    // do-nothing
-                }
+                Connection localFailoverConnection = failoverConnection;
+                assertThrows("We expect an exception here, because the connection should be gone until the reconnect code picks it up again",
+                        SQLException.class, () -> {
+                            localFailoverConnection.createStatement().execute("SELECT 1");
+                            return null;
+                        });
 
                 // Tickle re-connect
 
@@ -1037,27 +685,27 @@ public class ConnectionTest extends BaseTestCase {
         assertTrue("false".equals(cannedProps.getProperty(PropertyKey.failOverReadOnly.getKeyName())));
 
         // this will fail, but we test that too
-        assertThrows(InvalidConnectionAttributeException.class, "Can't find configuration template named 'clusterBase2'", new Callable<Void>() {
-            public Void call() throws Exception {
-                try {
-                    ConnectionUrl.getConnectionUrlInstance("jdbc:mysql:///?useConfigs=clusterBase,clusterBase2", null);
-                    return null;
-                } catch (Throwable t) {
-                    t.printStackTrace();
-                    throw t;
-                }
+        assertThrows(InvalidConnectionAttributeException.class, "Can't find configuration template named 'clusterBase2'", () -> {
+            try {
+                ConnectionUrl.getConnectionUrlInstance("jdbc:mysql:///?useConfigs=clusterBase,clusterBase2", null);
+                return null;
+            } catch (Throwable t) {
+                t.printStackTrace();
+                throw t;
             }
         });
     }
 
     /**
      * Checks implementation of 'dontTrackOpenResources' property.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testDontTrackOpenResources() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
 
         props.setProperty(PropertyKey.dontTrackOpenResources.getKeyName(), "true");
         Connection noTrackConn = null;
@@ -1099,22 +747,22 @@ public class ConnectionTest extends BaseTestCase {
 
     @Test
     public void testPing() throws SQLException {
-        Connection conn2 = getConnectionWithProps((String) null);
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        Connection conn2 = getConnectionWithProps(props);
 
         ((com.mysql.cj.jdbc.JdbcConnection) conn2).ping();
         conn2.close();
 
-        try {
+        assertThrows(SQLException.class, () -> {
             ((com.mysql.cj.jdbc.JdbcConnection) conn2).ping();
-            fail("Should have failed with an exception");
-        } catch (SQLException sqlEx) {
-            // ignore for now
-        }
+            return null;
+        });
 
         //
         // This feature caused BUG#8975, so check for that too!
 
-        Properties props = new Properties();
         props.setProperty(PropertyKey.autoReconnect.getKeyName(), "true");
 
         getConnectionWithProps(props);
@@ -1127,6 +775,8 @@ public class ConnectionTest extends BaseTestCase {
         int newWaitTimeout = Integer.parseInt(getInitialWaitTimeout) + 10000;
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.sessionVariables.getKeyName(), "wait_timeout=" + newWaitTimeout);
         props.setProperty(PropertyKey.profileSQL.getKeyName(), "true");
 
@@ -1137,7 +787,7 @@ public class ConnectionTest extends BaseTestCase {
 
     /**
      * Tests setting profileSQL on/off in the span of one connection.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1155,30 +805,31 @@ public class ConnectionTest extends BaseTestCase {
         this.stmt.executeUpdate("DROP DATABASE IF EXISTS " + databaseName);
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.createDatabaseIfNotExist.getKeyName(), "true");
         props.setProperty(PropertyKey.DBNAME.getKeyName(), databaseName);
 
         Connection con = getConnectionWithProps(props);
 
         this.rs = this.stmt.executeQuery("show databases like '" + databaseName + "'");
-        if (this.rs.next()) {
-            assertEquals(databaseName, this.rs.getString(1));
-        } else {
-            fail("Database " + databaseName + " is not found.");
-        }
+        assertTrue(this.rs.next(), "Database " + databaseName + " is not found.");
+        assertEquals(databaseName, this.rs.getString(1));
 
         con.createStatement().executeUpdate("DROP DATABASE IF EXISTS " + databaseName);
     }
 
     /**
      * Tests if gatherPerfMetrics works.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testGatherPerfMetrics() throws Exception {
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.autoReconnect.getKeyName(), "true");
             props.setProperty(PropertyKey.logSlowQueries.getKeyName(), "true");
             props.setProperty(PropertyKey.slowQueryThresholdMillis.getKeyName(), "2000");
@@ -1199,16 +850,15 @@ public class ConnectionTest extends BaseTestCase {
 
     /**
      * Tests if useCompress works.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testUseCompress() throws Exception {
         this.rs = this.stmt.executeQuery("SHOW VARIABLES LIKE 'max_allowed_packet'");
         this.rs.next();
-        if (this.rs.getInt(2) < 4 + 1024 * 1024 * 16 - 1) {
-            fail("You need to increase max_allowed_packet to at least " + (4 + 1024 * 1024 * 16 - 1) + " before running this test!");
-        }
+        long defaultMaxAllowedPacket = this.rs.getInt(2);
+        boolean changeMaxAllowedPacket = defaultMaxAllowedPacket < 4 + 1024 * 1024 * 32 - 1;
 
         if (versionMeetsMinimum(5, 6, 20) && !versionMeetsMinimum(5, 7)) {
             /*
@@ -1220,25 +870,34 @@ public class ConnectionTest extends BaseTestCase {
              */
             this.rs = this.stmt.executeQuery("SHOW VARIABLES LIKE 'innodb_log_file_size'");
             this.rs.next();
-            if (this.rs.getInt(2) < 1024 * 1024 * 32 * 10) {
-                fail("You need to increase innodb_log_file_size to at least " + (1024 * 1024 * 32 * 10) + " before running this test!");
-            }
+            assumeFalse(this.rs.getInt(2) < 1024 * 1024 * 32 * 10,
+                    "You need to increase innodb_log_file_size to at least " + 1024 * 1024 * 32 * 10 + " before running this test!");
         }
 
-        testCompressionWith("false", 1024 * 1024 * 16 - 2); // no split
-        testCompressionWith("false", 1024 * 1024 * 16 - 1); // split with additional empty packet
-        testCompressionWith("false", 1024 * 1024 * 32);   // big payload
+        try {
+            if (changeMaxAllowedPacket) {
+                this.stmt.executeUpdate("SET GLOBAL max_allowed_packet=" + 1024 * 1024 * 33);
+            }
 
-        testCompressionWith("true", 1024 * 1024 * 16 - 2 - 3); // no split, one compressed packet
-        testCompressionWith("true", 1024 * 1024 * 16 - 2 - 2); // no split, two compressed packets
-        testCompressionWith("true", 1024 * 1024 * 16 - 1);   // split with additional empty packet, two compressed packets
-        testCompressionWith("true", 1024 * 1024 * 32);     // big payload
+            testCompressionWith("false", 1024 * 1024 * 16 - 2); // no split
+            testCompressionWith("false", 1024 * 1024 * 16 - 1); // split with additional empty packet
+            testCompressionWith("false", 1024 * 1024 * 32);   // big payload
+
+            testCompressionWith("true", 1024 * 1024 * 16 - 2 - 3); // no split, one compressed packet
+            testCompressionWith("true", 1024 * 1024 * 16 - 2 - 2); // no split, two compressed packets
+            testCompressionWith("true", 1024 * 1024 * 16 - 1);   // split with additional empty packet, two compressed packets
+            testCompressionWith("true", 1024 * 1024 * 32);     // big payload
+        } finally {
+            if (changeMaxAllowedPacket) {
+                this.stmt.executeUpdate("SET GLOBAL max_allowed_packet=" + defaultMaxAllowedPacket);
+            }
+        }
     }
 
     /**
      * @param useCompression
      * @param maxPayloadSize
-     * 
+     *
      * @throws Exception
      */
     private void testCompressionWith(String useCompression, int maxPayloadSize) throws Exception {
@@ -1248,7 +907,7 @@ public class ConnectionTest extends BaseTestCase {
         File testBlobFile = File.createTempFile("cmj-testblob", ".dat");
         testBlobFile.deleteOnExit();
 
-        // TODO: following cleanup doesn't work correctly during concurrent execution of testsuite 
+        // TODO: following cleanup doesn't work correctly during concurrent execution of testsuite
         // cleanupTempFiles(testBlobFile, "cmj-testblob");
 
         BufferedOutputStream bOut = new BufferedOutputStream(new FileOutputStream(testBlobFile));
@@ -1263,6 +922,8 @@ public class ConnectionTest extends BaseTestCase {
         bOut.close();
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useCompression.getKeyName(), useCompression);
         Connection conn1 = getConnectionWithProps(props);
         Statement stmt1 = conn1.createStatement();
@@ -1286,9 +947,7 @@ public class ConnectionTest extends BaseTestCase {
         int count = 0;
         while ((blobbyte = is.read()) > -1) {
             int filebyte = bIn.read();
-            if (filebyte < 0 || filebyte != blobbyte) {
-                fail("Blob is not identical to initial data.");
-            }
+            assertFalse(filebyte < 0 || filebyte != blobbyte, "Blob is not identical to initial data.");
             count++;
         }
         assertEquals(requiredSize, count);
@@ -1303,7 +962,7 @@ public class ConnectionTest extends BaseTestCase {
      * Tests feature of "localSocketAddress", by enumerating local IF's and trying each one in turn. This test might take a long time to run, since we can't set
      * timeouts if we're using localSocketAddress. We try and keep the time down on the testcase by spawning the checking of each interface off into separate
      * threads.
-     * 
+     *
      * @throws Exception
      *             if the test can't use at least one of the local machine's interfaces to make an outgoing connection to the server.
      */
@@ -1356,6 +1015,7 @@ public class ConnectionTest extends BaseTestCase {
     }
 
     class SpawnedWorkerCounter {
+
         protected int workerCount = 0;
 
         synchronized void setWorkerCount(int i) {
@@ -1366,9 +1026,11 @@ public class ConnectionTest extends BaseTestCase {
             this.workerCount--;
             notify();
         }
+
     }
 
     class LocalSocketAddressCheckThread extends Thread {
+
         boolean atLeastOneWorked = false;
         Enumeration<InetAddress> allAddresses = null;
         SpawnedWorkerCounter counter = null;
@@ -1380,12 +1042,13 @@ public class ConnectionTest extends BaseTestCase {
 
         @Override
         public void run() {
-
             while (this.allAddresses.hasMoreElements()) {
                 InetAddress addr = this.allAddresses.nextElement();
 
                 try {
                     Properties props = new Properties();
+                    props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+                    props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
                     props.setProperty(PropertyKey.localSocketAddress.getKeyName(), addr.getHostAddress());
                     props.setProperty(PropertyKey.connectTimeout.getKeyName(), "2000");
                     getConnectionWithProps(props).close();
@@ -1400,6 +1063,7 @@ public class ConnectionTest extends BaseTestCase {
 
             this.counter.decrementWorkerCount();
         }
+
     }
 
     @Test
@@ -1412,6 +1076,8 @@ public class ConnectionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useUsageAdvisor.getKeyName(), "true");
             props.setProperty(PropertyKey.resultSetSizeThreshold.getKeyName(), "4");
             props.setProperty(PropertyKey.logger.getKeyName(), BufferingLogger.class.getName());
@@ -1434,9 +1100,11 @@ public class ConnectionTest extends BaseTestCase {
 
     @Test
     public void testUseLocalSessionStateRollback() throws Exception {
-        assumeTrue(versionMeetsMinimum(5, 5, 0));
+        assumeTrue(versionMeetsMinimum(5, 5, 0), "MySQL 5.5+ is required to run this test.");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useLocalSessionState.getKeyName(), "true");
         props.setProperty(PropertyKey.useLocalTransactionState.getKeyName(), "true");
         props.setProperty(PropertyKey.profileSQL.getKeyName(), "true");
@@ -1508,7 +1176,7 @@ public class ConnectionTest extends BaseTestCase {
 
     /**
      * Checks if setting useCursorFetch to "true" automatically enables server-side prepared statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1517,6 +1185,8 @@ public class ConnectionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "false"); // force the issue
             props.setProperty(PropertyKey.useCursorFetch.getKeyName(), "true");
             fetchConn = getConnectionWithProps(props);
@@ -1533,9 +1203,14 @@ public class ConnectionTest extends BaseTestCase {
 
     @Test
     public void testInterfaceImplementation() throws Exception {
-        testInterfaceImplementation(getConnectionWithProps((Properties) null));
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        testInterfaceImplementation(getConnectionWithProps(props));
         MysqlConnectionPoolDataSource cpds = new MysqlConnectionPoolDataSource();
         cpds.setUrl(dbUrl);
+        cpds.getStringProperty(PropertyKey.sslMode.getKeyName()).setValue("DISABLED");
+        cpds.getBooleanProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName()).setValue(true);
         testInterfaceImplementation(cpds.getPooledConnection().getConnection());
     }
 
@@ -1587,11 +1262,7 @@ public class ConnectionTest extends BaseTestCase {
 
             try {
                 toMatch.invoke(invokeOn, args);
-            } catch (IllegalArgumentException e) {
-
-            } catch (IllegalAccessException e) {
-
-            } catch (InvocationTargetException e) {
+            } catch (IllegalArgumentException | IllegalAccessException | InvocationTargetException e) {
 
             } catch (java.lang.AbstractMethodError e) {
                 throw e;
@@ -1601,16 +1272,25 @@ public class ConnectionTest extends BaseTestCase {
 
     @Test
     public void testNonVerifyServerCert() throws Exception {
+        assumeTrue((((MysqlConnection) this.conn).getSession().getServerSession().getCapabilities().getCapabilityFlags() & NativeServerSession.CLIENT_SSL) != 0,
+                "This test requires server with SSL support.");
+        assumeTrue(supportsTLSv1_2(((MysqlConnection) this.conn).getSession().getServerSession().getServerVersion()),
+                "This test requires server with TLSv1.2+ support.");
+        assumeTrue(supportsTestCertificates(this.stmt),
+                "This test requires the server configured with SSL certificates from ConnectorJ/src/test/config/ssl-test-certs");
+
         Properties props = new Properties();
-        props.setProperty(PropertyKey.useSSL.getKeyName(), "true");
-        props.setProperty(PropertyKey.verifyServerCertificate.getKeyName(), "false");
-        props.setProperty(PropertyKey.requireSSL.getKeyName(), "true");
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.REQUIRED.name());
         getConnectionWithProps(props);
     }
 
     @Test
     public void testSelfDestruct() throws Exception {
-        Connection selfDestructingConn = getConnectionWithProps("selfDestructOnPingMaxOperations=2");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.selfDestructOnPingMaxOperations.getKeyName(), "2");
+        Connection selfDestructingConn = getConnectionWithProps(props);
 
         boolean failed = false;
 
@@ -1630,13 +1310,13 @@ public class ConnectionTest extends BaseTestCase {
             }
         }
 
-        if (!failed) {
-            fail("Connection should've self-destructed");
-        }
+        assertTrue(failed, "Connection should've self-destructed");
 
         failed = false;
 
-        selfDestructingConn = getConnectionWithProps("selfDestructOnPingSecondsLifetime=1");
+        props.remove(PropertyKey.selfDestructOnPingMaxOperations.getKeyName());
+        props.setProperty(PropertyKey.selfDestructOnPingSecondsLifetime.getKeyName(), "1");
+        selfDestructingConn = getConnectionWithProps(props);
 
         for (int i = 0; i < 20; i++) {
             selfDestructingConn.createStatement().execute("SELECT SLEEP(1)");
@@ -1654,9 +1334,7 @@ public class ConnectionTest extends BaseTestCase {
             }
         }
 
-        if (!failed) {
-            fail("Connection should've self-destructed");
-        }
+        assertTrue(failed, "Connection should've self-destructed");
     }
 
     @Test
@@ -1665,7 +1343,11 @@ public class ConnectionTest extends BaseTestCase {
         Connection liConn = null;
 
         try {
-            liConn = getConnectionWithProps("connectionLifecycleInterceptors=testsuite.simple.TestLifecycleInterceptor");
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.connectionLifecycleInterceptors.getKeyName(), TestLifecycleInterceptor.class.getName());
+            liConn = getConnectionWithProps(props);
             liConn.setAutoCommit(false);
 
             liConn.createStatement().executeUpdate("INSERT INTO testLifecycleInterceptor VALUES (1)");
@@ -1698,6 +1380,8 @@ public class ConnectionTest extends BaseTestCase {
                 user != null ? user : "", password != null ? password : "", database);
 
         Properties props = getHostFreePropertiesFromTestsuiteUrl();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.remove(PropertyKey.USER.getKeyName());
         props.remove(PropertyKey.PASSWORD.getKeyName());
         props.remove(PropertyKey.DBNAME.getKeyName());
@@ -1711,18 +1395,38 @@ public class ConnectionTest extends BaseTestCase {
 
     @Test
     public void testCompression() throws Exception {
-        Connection compressedConn = getConnectionWithProps("useCompression=true,maxAllowedPacket=33554432");
-        Statement compressedStmt = compressedConn.createStatement();
-        compressedStmt.setFetchSize(Integer.MIN_VALUE);
-        this.rs = compressedStmt.executeQuery("select repeat('a', 256 * 256 * 256 - 5)");
+        this.rs = this.stmt.executeQuery("SHOW VARIABLES LIKE 'max_allowed_packet'");
         this.rs.next();
-        String str = this.rs.getString(1);
+        long len = 33554432;
+        long defaultMaxAllowedPacket = this.rs.getInt(2);
+        boolean changeMaxAllowedPacket = defaultMaxAllowedPacket < len;
 
-        assertEquals((256 * 256 * 256 - 5), str.length());
+        try {
+            if (changeMaxAllowedPacket) {
+                this.stmt.executeUpdate("SET GLOBAL max_allowed_packet=" + 1024 * 1024 * 32);
+            }
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.useCompression.getKeyName(), "true");
+            props.setProperty(PropertyKey.maxAllowedPacket.getKeyName(), "33554432");
+            Connection compressedConn = getConnectionWithProps(props);
+            Statement compressedStmt = compressedConn.createStatement();
+            compressedStmt.setFetchSize(Integer.MIN_VALUE);
+            this.rs = compressedStmt.executeQuery("select repeat('a', 256 * 256 * 256 - 5)");
+            this.rs.next();
+            String str = this.rs.getString(1);
 
-        for (int i = 0; i < str.length(); i++) {
-            if (str.charAt(i) != 'a') {
-                fail();
+            assertEquals(256 * 256 * 256 - 5, str.length());
+
+            for (int i = 0; i < str.length(); i++) {
+                if (str.charAt(i) != 'a') {
+                    fail();
+                }
+            }
+        } finally {
+            if (changeMaxAllowedPacket) {
+                this.stmt.executeUpdate("SET GLOBAL max_allowed_packet=" + defaultMaxAllowedPacket);
             }
         }
     }
@@ -1740,10 +1444,16 @@ public class ConnectionTest extends BaseTestCase {
 
     @Test
     public void testReadOnly56() throws Exception {
-        assumeTrue(versionMeetsMinimum(5, 6, 5));
+        assumeTrue(versionMeetsMinimum(5, 6, 5), "MySQL 5.6.5+ is required to run this test.");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.profileSQL.getKeyName(), "true");
+        props.setProperty(PropertyKey.logger.getKeyName(), BufferingLogger.class.getName());
 
         try {
-            Connection notLocalState = getConnectionWithProps("profileSQL=true,logger=" + BufferingLogger.class.getName());
+            Connection notLocalState = getConnectionWithProps(props);
 
             for (int i = 0; i < 2; i++) {
                 BufferingLogger.startLoggingToBuffer();
@@ -1761,7 +1471,8 @@ public class ConnectionTest extends BaseTestCase {
                 assertTrue(notLocalState.isReadOnly());
             }
 
-            Connection localState = getConnectionWithProps("profileSQL=true,useLocalSessionState=true,logger=" + BufferingLogger.class.getName());
+            props.setProperty(PropertyKey.useLocalSessionState.getKeyName(), "true");
+            Connection localState = getConnectionWithProps(props);
 
             String s = versionMeetsMinimum(8, 0, 3) ? "@@session.transaction_read_only" : "@@session.tx_read_only";
 
@@ -1778,7 +1489,9 @@ public class ConnectionTest extends BaseTestCase {
                 assertTrue(BufferingLogger.getBuffer().toString().indexOf("select @@session." + s) == -1);
             }
 
-            Connection noOptimization = getConnectionWithProps("profileSQL=true,readOnlyPropagatesToServer=false,logger=" + BufferingLogger.class.getName());
+            props.remove(PropertyKey.useLocalSessionState.getKeyName());
+            props.setProperty(PropertyKey.readOnlyPropagatesToServer.getKeyName(), "false");
+            Connection noOptimization = getConnectionWithProps(props);
 
             for (int i = 0; i < 2; i++) {
                 BufferingLogger.startLoggingToBuffer();
@@ -1795,23 +1508,25 @@ public class ConnectionTest extends BaseTestCase {
 
     /**
      * IPv6 Connection test.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testIPv6() throws Exception {
-        assumeTrue(versionMeetsMinimum(5, 6)); // this test could work with MySQL 5.5 but requires specific server configuration, e.g. "--bind-address=::"
+        assumeTrue(versionMeetsMinimum(5, 6), "MySQL 5.6+ is required to run this test."); // this test could work with MySQL 5.5 but requires specific server configuration, e.g. "--bind-address=::"
 
         String testUser = "testIPv6User";
         createUser("'" + testUser + "'@'%'", "IDENTIFIED BY '" + testUser + "'");
         this.stmt.execute("GRANT ALL ON *.* TO '" + testUser + "'@'%'");
 
         Properties connProps = getHostFreePropertiesFromTestsuiteUrl();
+        connProps.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        connProps.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         connProps.setProperty(PropertyKey.USER.getKeyName(), testUser);
         connProps.setProperty(PropertyKey.PASSWORD.getKeyName(), testUser);
 
         List<Inet6Address> ipv6List = isMysqlRunningLocally() ? TestUtils.getIpv6List() : TestUtils.getIpv6List(getHostFromTestsuiteUrl());
-        List<String> ipv6Addrs = ipv6List.stream().map((e) -> e.getHostAddress()).collect(Collectors.toList());
+        List<String> ipv6Addrs = ipv6List.stream().map(Inet6Address::getHostAddress).collect(Collectors.toList());
         if (isMysqlRunningLocally()) {
             ipv6Addrs.add("::1"); // IPv6 loopback
         }
@@ -1841,11 +1556,8 @@ public class ConnectionTest extends BaseTestCase {
         }
 
         if (!atLeastOne) {
-            if (isMysqlRunningLocally()) {
-                fail("None of the tested hosts have server sockets listening on the port " + port + ".");
-            } else {
-                System.err.println("None of the tested hosts have server sockets listening on the port " + port + ".");
-            }
+            assertFalse(isMysqlRunningLocally(), "None of the tested hosts have server sockets listening on the port " + port + ".");
+            System.err.println("None of the tested hosts have server sockets listening on the port " + port + ".");
         }
     }
 
@@ -1855,54 +1567,48 @@ public class ConnectionTest extends BaseTestCase {
      */
     @Test
     public void testDriverAcceptsURLNullArgument() {
-        assertThrows(SQLException.class, "The database URL cannot be null.", new Callable<Void>() {
-            public Void call() throws Exception {
-                Driver mysqlDriver = new Driver();
-                mysqlDriver.acceptsURL(null);
-                return null;
-            }
+        assertThrows(SQLException.class, "The database URL cannot be null.", () -> {
+            Driver mysqlDriver = new Driver();
+            mysqlDriver.acceptsURL(null);
+            return null;
         });
     }
 
     /**
      * Test for Driver.connect() behavior clarifications:
      * - connect() throws SQLException if URL is null.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testDriverConnectNullArgument() throws Exception {
         assertThrows(SQLException.class,
                 "Cannot load connection class because of underlying exception: com.mysql.cj.exceptions.WrongArgumentException: The database URL cannot be null.",
-                new Callable<Void>() {
-                    public Void call() throws Exception {
-                        Driver mysqlDriver = new Driver();
-                        mysqlDriver.connect(null, null);
-                        return null;
-                    }
+                () -> {
+                    Driver mysqlDriver = new Driver();
+                    mysqlDriver.connect(null, null);
+                    return null;
                 });
 
-        assertThrows(SQLException.class, "The url cannot be null", new Callable<Void>() {
-            public Void call() throws Exception {
-                DriverManager.getConnection(null);
-                return null;
-            }
+        assertThrows(SQLException.class, "The url cannot be null", () -> {
+            DriverManager.getConnection(null);
+            return null;
         });
     }
 
     /**
      * Test for Driver.connect() behavior clarifications:
      * - connect() properties precedence is implementation-defined.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testDriverConnectPropertiesPrecedence() throws Exception {
-        assertThrows(SQLException.class, "Access denied for user 'dummy'@'[^']+' \\(using password: YES\\)", new Callable<Void>() {
-            public Void call() throws Exception {
-                DriverManager.getConnection(BaseTestCase.dbUrl, "dummy", "dummy");
-                return null;
-            }
+        assertThrows(SQLException.class, "Access denied for user 'dummy'@'[^']+' \\(using password: YES\\)", () -> {
+            DriverManager.getConnection(
+                    (BaseTestCase.dbUrl.endsWith("?") ? BaseTestCase.dbUrl : BaseTestCase.dbUrl + "&") + "sslMode=DISABLED&allowPublicKeyRetrieval=true",
+                    "dummy", "dummy");
+            return null;
         });
 
         // make sure the connection string doesn't contain 'maxRows'
@@ -1918,6 +1624,9 @@ public class ConnectionTest extends BaseTestCase {
             }
             testUrl = testUrl.substring(0, b) + testUrl.substring(e, testUrl.length());
         }
+
+        // disable SSL
+        testUrl = (testUrl.endsWith("?") ? testUrl : testUrl + "&") + "sslMode=DISABLED&allowPublicKeyRetrieval=true";
 
         Properties props = new Properties();
         props.setProperty(PropertyKey.maxRows.getKeyName(), "123");
@@ -1947,7 +1656,7 @@ public class ConnectionTest extends BaseTestCase {
 
     /**
      * Test for REF_CURSOR support checking.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1958,11 +1667,11 @@ public class ConnectionTest extends BaseTestCase {
     /**
      * Test the new connection property 'enableEscapeProcessing', as well as the old connection property 'processEscapeCodesForPrepStmts' and interrelation
      * between them.
-     * 
+     *
      * This test uses a QueryInterceptor to capture the query sent to the server and assert whether escape processing has been done in the client side or if
      * the query is sent untouched and escape processing will be done at server side, according to provided connection properties and type of Statement objects
      * in use.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1989,6 +1698,8 @@ public class ConnectionTest extends BaseTestCase {
             boolean useServerPrepStmts = (tst & 0x4) != 0;
 
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.queryInterceptors.getKeyName(), TestEnableEscapeProcessingQueryInterceptor.class.getName());
             props.setProperty(PropertyKey.enableEscapeProcessing.getKeyName(), Boolean.toString(enableEscapeProcessing));
             props.setProperty(PropertyKey.processEscapeCodesForPrepStmts.getKeyName(), Boolean.toString(processEscapeCodesForPrepStmts));
@@ -2038,18 +1749,15 @@ public class ConnectionTest extends BaseTestCase {
     }
 
     public static class TestEnableEscapeProcessingQueryInterceptor extends BaseQueryInterceptor {
+
         @Override
         public <T extends Resultset> T preProcess(Supplier<String> str, Query interceptedQuery) {
             String sql = str == null ? null : str.get();
             if (sql == null) {
-                try {
-                    if (interceptedQuery instanceof ClientPreparedStatement) {
-                        sql = ((ClientPreparedStatement) interceptedQuery).asSql();
-                    } else if (interceptedQuery instanceof PreparedQuery<?>) {
-                        sql = ((PreparedQuery<?>) interceptedQuery).asSql();
-                    }
-                } catch (SQLException ex) {
-                    throw ExceptionFactory.createException(ex.getMessage(), ex);
+                if (interceptedQuery instanceof ClientPreparedStatement) {
+                    sql = ((PreparedQuery) (ClientPreparedStatement) interceptedQuery).asSql();
+                } else if (interceptedQuery instanceof PreparedQuery) {
+                    sql = ((PreparedQuery) interceptedQuery).asSql();
                 }
             }
 
@@ -2059,7 +1767,7 @@ public class ConnectionTest extends BaseTestCase {
                 boolean enableEscapeProcessing = (tst & 0x1) != 0;
                 boolean processEscapeCodesForPrepStmts = (tst & 0x2) != 0;
                 boolean useServerPrepStmts = (tst & 0x4) != 0;
-                boolean isPreparedStatement = interceptedQuery instanceof PreparedStatement || interceptedQuery instanceof PreparedQuery<?>;
+                boolean isPreparedStatement = interceptedQuery instanceof PreparedStatement || interceptedQuery instanceof PreparedQuery;
 
                 String testCase = String.format("Case: %d [ %s | %s | %s ]/%s", tst, enableEscapeProcessing ? "enEscProc" : "-",
                         processEscapeCodesForPrepStmts ? "procEscProcPS" : "-", useServerPrepStmts ? "useSSPS" : "-",
@@ -2070,10 +1778,9 @@ public class ConnectionTest extends BaseTestCase {
                         || !isPreparedStatement && enableEscapeProcessing == escapeProcessingDone, testCase);
             }
             final String fsql = sql;
-            return super.preProcess(() -> {
-                return fsql;
-            }, interceptedQuery);
+            return super.preProcess(() -> fsql, interceptedQuery);
         }
+
     }
 
     @Test
@@ -2082,6 +1789,8 @@ public class ConnectionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useCompression.getKeyName(), "false");
             props.setProperty(PropertyKey.maintainTimeStats.getKeyName(), "true");
             props.setProperty(PropertyKey.traceProtocol.getKeyName(), "true");
@@ -2194,431 +1903,15 @@ public class ConnectionTest extends BaseTestCase {
     }
 
     /**
-     * Test authentication with a user that requires an SSL connection.
-     * 
-     * This test requires the CA truststore and the client keystore available in src/test/config/ssl-test-certs.
-     * The server needs to be configured with the CA and server certificates from src/test/config/ssl-test-certs.
-     * 
-     * @throws Exception
-     */
-    @Test
-    public void testUserRequireSSL() throws Exception {
-        assumeTrue(versionMeetsMinimum(5, 7, 6));
-
-        Connection testConn;
-        Statement testStmt;
-
-        final String user = "testUserReqSSL";
-        final String password = "testUserReqSSL";
-
-        final Properties props = new Properties();
-        props.setProperty(PropertyKey.USER.getKeyName(), user);
-        props.setProperty(PropertyKey.PASSWORD.getKeyName(), password);
-
-        createUser("'" + user + "'@'%'", "IDENTIFIED BY '" + password + "' REQUIRE SSL");
-        this.stmt.execute("GRANT SELECT ON *.* TO '" + user + "'@'%'");
-
-        /*
-         * No SSL.
-         */
-        props.setProperty(PropertyKey.useSSL.getKeyName(), "false");
-        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
-        assertThrows(SQLException.class, "Access denied for user '" + user + "'@.*", new Callable<Void>() {
-            public Void call() throws Exception {
-                getConnectionWithProps(props);
-                return null;
-            }
-        });
-
-        /*
-         * SSL: no server certificate validation & no client certificate.
-         */
-        props.setProperty(PropertyKey.useSSL.getKeyName(), "true");
-        props.setProperty(PropertyKey.verifyServerCertificate.getKeyName(), "false");
-        testConn = getConnectionWithProps(props);
-        testStmt = testConn.createStatement();
-        this.rs = testStmt.executeQuery("SELECT CURRENT_USER()");
-        assertTrue(this.rs.next());
-        assertEquals(user, this.rs.getString(1).split("@")[0]);
-        testConn.close();
-
-        /*
-         * SSL: server certificate validation & no client certificate.
-         */
-        props.setProperty(PropertyKey.verifyServerCertificate.getKeyName(), "true");
-        props.setProperty(PropertyKey.trustCertificateKeyStoreUrl.getKeyName(), "file:src/test/config/ssl-test-certs/ca-truststore");
-        props.setProperty(PropertyKey.trustCertificateKeyStoreType.getKeyName(), "JKS");
-        props.setProperty(PropertyKey.trustCertificateKeyStorePassword.getKeyName(), "password");
-        testConn = getConnectionWithProps(props);
-        testStmt = testConn.createStatement();
-        this.rs = testStmt.executeQuery("SELECT CURRENT_USER()");
-        assertTrue(this.rs.next());
-        assertEquals(user, this.rs.getString(1).split("@")[0]);
-        testConn.close();
-
-        /*
-         * SSL: server certificate validation & client certificate.
-         */
-        props.setProperty(PropertyKey.clientCertificateKeyStoreUrl.getKeyName(), "file:src/test/config/ssl-test-certs/client-keystore");
-        props.setProperty(PropertyKey.clientCertificateKeyStoreType.getKeyName(), "JKS");
-        props.setProperty(PropertyKey.clientCertificateKeyStorePassword.getKeyName(), "password");
-        testConn = getConnectionWithProps(props);
-        testStmt = testConn.createStatement();
-        this.rs = testStmt.executeQuery("SELECT CURRENT_USER()");
-        assertTrue(this.rs.next());
-        assertEquals(user, this.rs.getString(1).split("@")[0]);
-        testConn.close();
-
-        /*
-         * SSL: no server certificate validation & client certificate.
-         */
-        props.setProperty(PropertyKey.verifyServerCertificate.getKeyName(), "false");
-        props.remove(PropertyKey.trustCertificateKeyStoreUrl.getKeyName());
-        props.remove(PropertyKey.trustCertificateKeyStoreType.getKeyName());
-        props.remove(PropertyKey.trustCertificateKeyStorePassword.getKeyName());
-        testConn = getConnectionWithProps(props);
-        testStmt = testConn.createStatement();
-        this.rs = testStmt.executeQuery("SELECT CURRENT_USER()");
-        assertTrue(this.rs.next());
-        assertEquals(user, this.rs.getString(1).split("@")[0]);
-        testConn.close();
-    }
-
-    /**
-     * Test authentication with a user that requires an SSL connection and an authorized client certificate.
-     * 
-     * This test requires the CA truststore and the client keystore available in src/test/config/ssl-test-certs.
-     * The server needs to be configured with the CA and server certificates from src/test/config/ssl-test-certs.
-     * 
-     * @throws Exception
-     */
-    @Test
-    public void testUserRequireX509() throws Exception {
-        assumeTrue(versionMeetsMinimum(5, 7, 6));
-
-        Connection testConn;
-        Statement testStmt;
-
-        final String user = "testUserReqX509";
-        final String password = "testUserReqX509";
-
-        final Properties props = new Properties();
-        props.setProperty(PropertyKey.USER.getKeyName(), user);
-        props.setProperty(PropertyKey.PASSWORD.getKeyName(), password);
-
-        createUser("'" + user + "'@'%'", "IDENTIFIED BY '" + password + "' REQUIRE X509");
-        this.stmt.execute("GRANT SELECT ON *.* TO '" + user + "'@'%'");
-
-        /*
-         * No SSL.
-         */
-        props.setProperty(PropertyKey.useSSL.getKeyName(), "false");
-        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
-        assertThrows(SQLException.class, "Access denied for user '" + user + "'@.*", new Callable<Void>() {
-            public Void call() throws Exception {
-                getConnectionWithProps(props);
-                return null;
-            }
-        });
-
-        /*
-         * SSL: no server certificate validation & no client certificate.
-         */
-        props.setProperty(PropertyKey.useSSL.getKeyName(), "true");
-        props.setProperty(PropertyKey.verifyServerCertificate.getKeyName(), "false");
-        assertThrows(SQLException.class, "Access denied for user '" + user + "'@.*", new Callable<Void>() {
-            public Void call() throws Exception {
-                getConnectionWithProps(props);
-                return null;
-            }
-        });
-
-        /*
-         * SSL: server certificate validation & no client certificate.
-         */
-        props.setProperty(PropertyKey.verifyServerCertificate.getKeyName(), "true");
-        props.setProperty(PropertyKey.trustCertificateKeyStoreUrl.getKeyName(), "file:src/test/config/ssl-test-certs/ca-truststore");
-        props.setProperty(PropertyKey.trustCertificateKeyStoreType.getKeyName(), "JKS");
-        props.setProperty(PropertyKey.trustCertificateKeyStorePassword.getKeyName(), "password");
-        assertThrows(SQLException.class, "Access denied for user '" + user + "'@.*", new Callable<Void>() {
-            public Void call() throws Exception {
-                getConnectionWithProps(props);
-                return null;
-            }
-        });
-
-        /*
-         * SSL: server certificate validation & client certificate.
-         */
-        props.setProperty(PropertyKey.clientCertificateKeyStoreUrl.getKeyName(), "file:src/test/config/ssl-test-certs/client-keystore");
-        props.setProperty(PropertyKey.clientCertificateKeyStoreType.getKeyName(), "JKS");
-        props.setProperty(PropertyKey.clientCertificateKeyStorePassword.getKeyName(), "password");
-        testConn = getConnectionWithProps(props);
-        testStmt = testConn.createStatement();
-        this.rs = testStmt.executeQuery("SELECT CURRENT_USER()");
-        assertTrue(this.rs.next());
-        assertEquals(user, this.rs.getString(1).split("@")[0]);
-        testConn.close();
-
-        /*
-         * SSL: no server certificate validation & client certificate.
-         */
-        props.setProperty(PropertyKey.verifyServerCertificate.getKeyName(), "false");
-        props.remove(PropertyKey.trustCertificateKeyStoreUrl.getKeyName());
-        props.remove(PropertyKey.trustCertificateKeyStoreType.getKeyName());
-        props.remove(PropertyKey.trustCertificateKeyStorePassword.getKeyName());
-        testConn = getConnectionWithProps(props);
-        testStmt = testConn.createStatement();
-        this.rs = testStmt.executeQuery("SELECT CURRENT_USER()");
-        assertTrue(this.rs.next());
-        assertEquals(user, this.rs.getString(1).split("@")[0]);
-        testConn.close();
-    }
-
-    /**
-     * Tests that given SSL/TLS related connection properties values are processed as expected.
-     * 
-     * @throws Exception
-     */
-    @Test
-    public void testSslConnectionOptions() throws Exception {
-        Connection testConn;
-        JdbcPropertySet propSet;
-
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl, "");
-        propSet = ((JdbcConnection) testConn).getPropertySet();
-        assertEquals(SslMode.PREFERRED, propSet.getProperty(PropertyKey.sslMode).getValue());
-        assertNull(propSet.getProperty(PropertyKey.trustCertificateKeyStoreUrl).getValue());
-        assertEquals("JKS", propSet.getProperty(PropertyKey.trustCertificateKeyStoreType).getValue());
-        assertNull(propSet.getProperty(PropertyKey.trustCertificateKeyStorePassword).getValue());
-        assertTrue(propSet.getBooleanProperty(PropertyKey.fallbackToSystemTrustStore).getValue());
-        assertNull(propSet.getProperty(PropertyKey.clientCertificateKeyStoreUrl).getValue());
-        assertEquals("JKS", propSet.getProperty(PropertyKey.clientCertificateKeyStoreType).getValue());
-        assertNull(propSet.getProperty(PropertyKey.clientCertificateKeyStorePassword).getValue());
-        assertTrue(propSet.getBooleanProperty(PropertyKey.fallbackToSystemKeyStore).getValue());
-        testConn.close();
-
-        Properties props = new Properties();
-        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.toString());
-        props.setProperty(PropertyKey.trustCertificateKeyStoreUrl.getKeyName(), "trust-cert-keystore-url");
-        props.setProperty(PropertyKey.trustCertificateKeyStoreType.getKeyName(), "trust-cert-keystore-type");
-        props.setProperty(PropertyKey.trustCertificateKeyStorePassword.getKeyName(), "trust-cert-keystore-pwd");
-        props.setProperty(PropertyKey.fallbackToSystemTrustStore.getKeyName(), "false");
-        props.setProperty(PropertyKey.clientCertificateKeyStoreUrl.getKeyName(), "client-cert-keystore-url");
-        props.setProperty(PropertyKey.clientCertificateKeyStoreType.getKeyName(), "client-cert-keystore-type");
-        props.setProperty(PropertyKey.clientCertificateKeyStorePassword.getKeyName(), "client-cert-keystore-pwd");
-        props.setProperty(PropertyKey.fallbackToSystemKeyStore.getKeyName(), "false");
-
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl, props);
-        propSet = ((JdbcConnection) testConn).getPropertySet();
-        assertEquals(SslMode.DISABLED, propSet.getProperty(PropertyKey.sslMode).getValue());
-        assertEquals("trust-cert-keystore-url", propSet.getProperty(PropertyKey.trustCertificateKeyStoreUrl).getValue());
-        assertEquals("trust-cert-keystore-type", propSet.getProperty(PropertyKey.trustCertificateKeyStoreType).getValue());
-        assertEquals("trust-cert-keystore-pwd", propSet.getProperty(PropertyKey.trustCertificateKeyStorePassword).getValue());
-        assertFalse(propSet.getBooleanProperty(PropertyKey.fallbackToSystemTrustStore).getValue());
-        assertEquals("client-cert-keystore-url", propSet.getProperty(PropertyKey.clientCertificateKeyStoreUrl).getValue());
-        assertEquals("client-cert-keystore-type", propSet.getProperty(PropertyKey.clientCertificateKeyStoreType).getValue());
-        assertEquals("client-cert-keystore-pwd", propSet.getProperty(PropertyKey.clientCertificateKeyStorePassword).getValue());
-        assertFalse(propSet.getBooleanProperty(PropertyKey.fallbackToSystemKeyStore).getValue());
-        testConn.close();
-
-        props.setProperty(PropertyKey.fallbackToSystemTrustStore.getKeyName(), "true");
-        props.setProperty(PropertyKey.fallbackToSystemKeyStore.getKeyName(), "true");
-
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl, props);
-        propSet = ((JdbcConnection) testConn).getPropertySet();
-        assertEquals(SslMode.DISABLED, propSet.getProperty(PropertyKey.sslMode).getValue());
-        assertEquals("trust-cert-keystore-url", propSet.getProperty(PropertyKey.trustCertificateKeyStoreUrl).getValue());
-        assertEquals("trust-cert-keystore-type", propSet.getProperty(PropertyKey.trustCertificateKeyStoreType).getValue());
-        assertEquals("trust-cert-keystore-pwd", propSet.getProperty(PropertyKey.trustCertificateKeyStorePassword).getValue());
-        assertTrue(propSet.getBooleanProperty(PropertyKey.fallbackToSystemTrustStore).getValue());
-        assertEquals("client-cert-keystore-url", propSet.getProperty(PropertyKey.clientCertificateKeyStoreUrl).getValue());
-        assertEquals("client-cert-keystore-type", propSet.getProperty(PropertyKey.clientCertificateKeyStoreType).getValue());
-        assertEquals("client-cert-keystore-pwd", propSet.getProperty(PropertyKey.clientCertificateKeyStorePassword).getValue());
-        assertTrue(propSet.getBooleanProperty(PropertyKey.fallbackToSystemKeyStore).getValue());
-        testConn.close();
-    }
-
-    /**
-     * Tests connection property 'testFallbackToSystemTrustStore' behavior.
-     * 
-     * @throws Exception
-     */
-    @Test
-    public void testFallbackToSystemTrustStore() throws Exception {
-        Connection testConn;
-
-        /*
-         * Valid system-wide TrustStore.
-         */
-        System.setProperty("javax.net.ssl.trustStore", "file:src/test/config/ssl-test-certs/ca-truststore");
-        System.setProperty("javax.net.ssl.trustStoreType", "JKS");
-        System.setProperty("javax.net.ssl.trustStorePassword", "password");
-
-        // No connection-local TrustStore.
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl, "sslMode=REQUIRED");
-        assertSecureConnection(testConn);
-        testConn.close();
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl, "sslMode=VERIFY_CA");
-        assertSecureConnection(testConn);
-        testConn.close();
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl, "sslMode=VERIFY_CA,fallbackToSystemTrustStore=true");
-        assertSecureConnection(testConn);
-        testConn.close();
-        assertThrows(CommunicationsException.class, () -> getConnectionWithProps(this.sslFreeBaseUrl, "sslMode=VERIFY_CA,fallbackToSystemTrustStore=false"));
-
-        // Invalid connection-local TrustStore:
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl,
-                "sslMode=REQUIRED,trustCertificateKeyStoreUrl=file:src/test/config/ssl-test-certs/ca-truststore-ext,"
-                        + "trustCertificateKeyStoreType=JKS,trustCertificateKeyStorePassword=password");
-        assertSecureConnection(testConn);
-        testConn.close();
-        assertThrows(CommunicationsException.class,
-                () -> getConnectionWithProps(this.sslFreeBaseUrl,
-                        "sslMode=VERIFY_CA,trustCertificateKeyStoreUrl=file:src/test/config/ssl-test-certs/ca-truststore-ext,"
-                                + "trustCertificateKeyStoreType=JKS,trustCertificateKeyStorePassword=password"));
-        assertThrows(CommunicationsException.class,
-                () -> getConnectionWithProps(this.sslFreeBaseUrl,
-                        "sslMode=VERIFY_CA,fallbackToSystemTrustStore=true,trustCertificateKeyStoreUrl=file:src/test/config/ssl-test-certs/ca-truststore-ext,"
-                                + "trustCertificateKeyStoreType=JKS,trustCertificateKeyStorePassword=password"));
-        assertThrows(CommunicationsException.class,
-                () -> getConnectionWithProps(this.sslFreeBaseUrl,
-                        "sslMode=VERIFY_CA,fallbackToSystemTrustStore=false,trustCertificateKeyStoreUrl=file:src/test/config/ssl-test-certs/ca-truststore-ext,"
-                                + "trustCertificateKeyStoreType=JKS,trustCertificateKeyStorePassword=password"));
-
-        /*
-         * Invalid system-wide TrustStore.
-         */
-        System.setProperty("javax.net.ssl.trustStore", "file:src/test/config/ssl-test-certs/ca-truststore-ext");
-        System.setProperty("javax.net.ssl.trustStoreType", "JKS");
-        System.setProperty("javax.net.ssl.trustStorePassword", "password");
-
-        // No connection-local TrustStore.
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl, "sslMode=REQUIRED");
-        assertSecureConnection(testConn);
-        testConn.close();
-        assertThrows(CommunicationsException.class, () -> getConnectionWithProps(this.sslFreeBaseUrl, "sslMode=VERIFY_CA"));
-        assertThrows(CommunicationsException.class, () -> getConnectionWithProps(this.sslFreeBaseUrl, "sslMode=VERIFY_CA,fallbackToSystemTrustStore=true"));
-        assertThrows(CommunicationsException.class, () -> getConnectionWithProps(this.sslFreeBaseUrl, "sslMode=VERIFY_CA,fallbackToSystemTrustStore=false"));
-
-        // Valid connection-local TrustStore:
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl, "sslMode=REQUIRED,trustCertificateKeyStoreUrl=file:src/test/config/ssl-test-certs/ca-truststore,"
-                + "trustCertificateKeyStoreType=JKS,trustCertificateKeyStorePassword=password");
-        assertSecureConnection(testConn);
-        testConn.close();
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl,
-                "sslMode=VERIFY_CA,trustCertificateKeyStoreUrl=file:src/test/config/ssl-test-certs/ca-truststore,"
-                        + "trustCertificateKeyStoreType=JKS,trustCertificateKeyStorePassword=password");
-        assertSecureConnection(testConn);
-        testConn.close();
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl,
-                "sslMode=VERIFY_CA,fallbackToSystemTrustStore=true,trustCertificateKeyStoreUrl=file:src/test/config/ssl-test-certs/ca-truststore,"
-                        + "trustCertificateKeyStoreType=JKS,trustCertificateKeyStorePassword=password");
-        assertSecureConnection(testConn);
-        testConn.close();
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl,
-                "sslMode=VERIFY_CA,fallbackToSystemTrustStore=false,trustCertificateKeyStoreUrl=file:src/test/config/ssl-test-certs/ca-truststore,"
-                        + "trustCertificateKeyStoreType=JKS,trustCertificateKeyStorePassword=password");
-        assertSecureConnection(testConn);
-        testConn.close();
-    }
-
-    /**
-     * Tests connection property 'testFallbackToSystemKeyStore' behavior.
-     * 
-     * @throws Exception
-     */
-    @Test
-    public void testFallbackToSystemKeyStore() throws Exception {
-        assumeTrue(versionMeetsMinimum(5, 7, 6));
-
-        final String user = "testFbToSysKS";
-        createUser(user, "IDENTIFIED BY 'password' REQUIRE X509");
-        this.stmt.execute("GRANT ALL ON *.* TO '" + user + "'@'%'");
-
-        final Properties props = new Properties();
-        props.setProperty(PropertyKey.USER.getKeyName(), user);
-        props.setProperty(PropertyKey.PASSWORD.getKeyName(), "password");
-        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.REQUIRED.toString());
-
-        Connection testConn;
-
-        /*
-         * Valid system-wide KeyStore.
-         */
-        System.setProperty("javax.net.ssl.keyStore", "file:src/test/config/ssl-test-certs/client-keystore");
-        System.setProperty("javax.net.ssl.keyStoreType", "JKS");
-        System.setProperty("javax.net.ssl.keyStorePassword", "password");
-
-        // No connection-local KeyStore.
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl, props);
-        assertSecureConnection(testConn, user);
-        testConn.close();
-        props.setProperty(PropertyKey.fallbackToSystemKeyStore.getKeyName(), "true");
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl, props);
-        assertSecureConnection(testConn, user);
-        testConn.close();
-        props.setProperty(PropertyKey.fallbackToSystemKeyStore.getKeyName(), "false");
-        assertThrows(SQLException.class, "Access denied for user '" + user + "'@.*", () -> getConnectionWithProps(this.sslFreeBaseUrl, props));
-
-        props.remove(PropertyKey.fallbackToSystemKeyStore.getKeyName());
-
-        // Invalid connection-local KeyStore:
-        props.setProperty(PropertyKey.clientCertificateKeyStoreUrl.getKeyName(), "file:src/test/config/ssl-test-certs/client-keystore-ext");
-        props.setProperty(PropertyKey.clientCertificateKeyStoreType.getKeyName(), "JKS");
-        props.setProperty(PropertyKey.clientCertificateKeyStorePassword.getKeyName(), "password");
-        assertThrows(CommunicationsException.class, () -> getConnectionWithProps(this.sslFreeBaseUrl, props));
-        props.setProperty(PropertyKey.fallbackToSystemKeyStore.getKeyName(), "true");
-        assertThrows(CommunicationsException.class, () -> getConnectionWithProps(this.sslFreeBaseUrl, props));
-        props.setProperty(PropertyKey.fallbackToSystemKeyStore.getKeyName(), "false");
-        assertThrows(CommunicationsException.class, () -> getConnectionWithProps(this.sslFreeBaseUrl, props));
-
-        props.remove(PropertyKey.clientCertificateKeyStoreUrl.getKeyName());
-        props.remove(PropertyKey.clientCertificateKeyStoreType.getKeyName());
-        props.remove(PropertyKey.clientCertificateKeyStorePassword.getKeyName());
-        props.remove(PropertyKey.fallbackToSystemKeyStore.getKeyName());
-
-        /*
-         * Invalid system-wide KeyStore.
-         */
-        System.setProperty("javax.net.ssl.keyStore", "file:src/test/config/ssl-test-certs/client-keystore-ext");
-        System.setProperty("javax.net.ssl.keyStoreType", "JKS");
-        System.setProperty("javax.net.ssl.keyStorePassword", "password");
-
-        // No connection-local KeyStore.
-        assertThrows(CommunicationsException.class, () -> getConnectionWithProps(this.sslFreeBaseUrl, props));
-        props.setProperty(PropertyKey.fallbackToSystemKeyStore.getKeyName(), "true");
-        assertThrows(CommunicationsException.class, () -> getConnectionWithProps(this.sslFreeBaseUrl, props));
-        props.setProperty(PropertyKey.fallbackToSystemKeyStore.getKeyName(), "false");
-        assertThrows(SQLException.class, "Access denied for user '" + user + "'@.*", () -> getConnectionWithProps(this.sslFreeBaseUrl, props));
-
-        props.remove(PropertyKey.fallbackToSystemKeyStore.getKeyName());
-
-        // Valid connection-local KeyStore:
-        props.setProperty(PropertyKey.clientCertificateKeyStoreUrl.getKeyName(), "file:src/test/config/ssl-test-certs/client-keystore");
-        props.setProperty(PropertyKey.clientCertificateKeyStoreType.getKeyName(), "JKS");
-        props.setProperty(PropertyKey.clientCertificateKeyStorePassword.getKeyName(), "password");
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl, props);
-        assertSecureConnection(testConn, user);
-        testConn.close();
-        props.setProperty(PropertyKey.fallbackToSystemKeyStore.getKeyName(), "true");
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl, props);
-        assertSecureConnection(testConn, user);
-        testConn.close();
-        props.setProperty(PropertyKey.fallbackToSystemKeyStore.getKeyName(), "false");
-        testConn = getConnectionWithProps(this.sslFreeBaseUrl, props);
-        assertSecureConnection(testConn, user);
-        testConn.close();
-    }
-
-    /**
      * Tests "LOAD DATA LOCAL INFILE" statements when enabled but restricted to a specific path, by specifying a path in the connection property
      * 'allowLoadLocalInfileInPath'.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testAllowLoadLocalInfileInPath() throws Exception {
+        assumeTrue(supportsLoadLocalInfile(this.stmt), "This test requires the server started with --local-infile=ON");
+
         Path tmpDir = Paths.get(System.getProperty("java.io.tmpdir"));
 
         /*
@@ -2670,6 +1963,8 @@ public class ConnectionTest extends BaseTestCase {
 
         createTable("testAllowLoadLocalInfileInPath", "(data VARCHAR(100))");
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
 
         // Default behavior: 'allowLoadLocalInfile' not set (false) & 'allowLoadLocalInfile' not set (NULL) & 'allowUrlInLocalInfile' not set (false).
         try (Connection testConn = getConnectionWithProps(props)) {
@@ -2677,7 +1972,7 @@ public class ConnectionTest extends BaseTestCase {
             assertThrows(SQLSyntaxErrorException.class,
                     versionMeetsMinimum(8, 0, 19) ? "Loading local data is disabled; this must be enabled on both the client and server sides"
                             : "The used command is not allowed with this MySQL version",
-                    () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                    () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
         }
 
         // 'allowLoadLocalInfile=false' & 'allowLoadLocalInfile' not set (NULL) & 'allowUrlInLocalInfile' not set (false).
@@ -2687,7 +1982,7 @@ public class ConnectionTest extends BaseTestCase {
             assertThrows(SQLSyntaxErrorException.class,
                     versionMeetsMinimum(8, 0, 19) ? "Loading local data is disabled; this must be enabled on both the client and server sides"
                             : "The used command is not allowed with this MySQL version",
-                    () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                    () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
         }
 
         // 'allowLoadLocalInfile=true' & 'allowLoadLocalInfile' not set or set with any value & 'allowUrlInLocalInfile' not set (false).
@@ -2695,31 +1990,31 @@ public class ConnectionTest extends BaseTestCase {
         props.setProperty(PropertyKey.allowLoadLocalInfile.getKeyName(), "true");
         try (Connection testConn = getConnectionWithProps(props)) {
             Statement testStmt = testConn.createStatement();
-            testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+            testStmt.execute("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
             testAllowLoadLocalInfileInPathCheckAndDelete();
         }
         props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), ""); // Empty dir name.
         try (Connection testConn = getConnectionWithProps(props)) {
             Statement testStmt = testConn.createStatement();
-            testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+            testStmt.execute("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
             testAllowLoadLocalInfileInPathCheckAndDelete();
         }
         props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), "   "); // Dir name with spaces.
         try (Connection testConn = getConnectionWithProps(props)) {
             Statement testStmt = testConn.createStatement();
-            testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+            testStmt.execute("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
             testAllowLoadLocalInfileInPathCheckAndDelete();
         }
         props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), tmpDir1.toString() + File.separator + "sub_12"); // Non-existing dir.
         try (Connection testConn = getConnectionWithProps(props)) {
             Statement testStmt = testConn.createStatement();
-            testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+            testStmt.execute("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
             testAllowLoadLocalInfileInPathCheckAndDelete();
         }
         props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), tmpDir2.toString()); // File not in the dir.
         try (Connection testConn = getConnectionWithProps(props)) {
             Statement testStmt = testConn.createStatement();
-            testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+            testStmt.execute("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
             testAllowLoadLocalInfileInPathCheckAndDelete();
         }
 
@@ -2749,44 +2044,44 @@ public class ConnectionTest extends BaseTestCase {
             props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), tmpDir.toString());
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
-                testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+                testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
                 testAllowLoadLocalInfileInPathCheckAndDelete();
             }
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
-                testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+                testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath");
                 testAllowLoadLocalInfileInPathCheckAndDelete();
             }
             props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), tmpDir1.toString());
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
-                testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+                testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
                 testAllowLoadLocalInfileInPathCheckAndDelete();
             }
             props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), tmpSDir1.toString());
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
-                testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+                testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
                 testAllowLoadLocalInfileInPathCheckAndDelete();
             }
             props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), tmpSSDir1.toString());
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
-                testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+                testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
                 testAllowLoadLocalInfileInPathCheckAndDelete();
             }
             props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(),
                     tmpDir2.toString() + File.separator + ".." + File.separator + tmpDir1.getFileName());
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
-                testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+                testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
                 testAllowLoadLocalInfileInPathCheckAndDelete();
             }
             if (!skipLinkCheck) {
                 props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), tmpLink2.toString());
                 try (Connection testConn = getConnectionWithProps(props)) {
                     Statement testStmt = testConn.createStatement();
-                    testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+                    testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
                     testAllowLoadLocalInfileInPathCheckAndDelete();
                 }
             }
@@ -2797,33 +2092,33 @@ public class ConnectionTest extends BaseTestCase {
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
                 assertThrows(SQLException.class, "(?i)The file '" + dataPath2 + "' is not under the safe path '.*'\\.",
-                        () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                        () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
             }
             props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), tmpSDir1.toString());
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
                 assertThrows(SQLException.class, "(?i)The file '" + dataPath2 + "' is not under the safe path '.*'\\.",
-                        () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                        () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
             }
             props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), tmpSSDir1.toString());
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
                 assertThrows(SQLException.class, "(?i)The file '" + dataPath2 + "' is not under the safe path '.*'\\.",
-                        () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                        () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
             }
             props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(),
                     tmpDir2.toString() + File.separator + ".." + File.separator + tmpDir1.getFileName());
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
                 assertThrows(SQLException.class, "(?i)The file '" + dataPath2 + "' is not under the safe path '.*'\\.",
-                        () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                        () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
             }
             if (!skipLinkCheck) {
                 props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), tmpLink2.toString());
                 try (Connection testConn = getConnectionWithProps(props)) {
                     Statement testStmt = testConn.createStatement();
                     assertThrows(SQLException.class, "(?i)The file '" + dataPath2 + "' is not under the safe path '.*'\\.",
-                            () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                            () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
                 }
             }
 
@@ -2833,23 +2128,23 @@ public class ConnectionTest extends BaseTestCase {
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
                 assertThrows(SQLException.class, "The path '' specified in 'allowLoadLocalInfileInPath' does not exist\\.",
-                        () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                        () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
             }
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
                 assertThrows(SQLException.class, "The path '' specified in 'allowLoadLocalInfileInPath' does not exist\\.",
-                        () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                        () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
             }
             props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), "   "); // Dir name with spaces.
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
                 assertThrows(SQLException.class, "The path '   ' specified in 'allowLoadLocalInfileInPath' does not exist\\.",
-                        () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                        () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
             }
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
                 assertThrows(SQLException.class, "The path '   ' specified in 'allowLoadLocalInfileInPath' does not exist\\.",
-                        () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                        () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
             }
             props.setProperty(PropertyKey.allowLoadLocalInfileInPath.getKeyName(), tmpDir1.toString() + File.separator + "sub_12"); // Non-existing dir.
             try (Connection testConn = getConnectionWithProps(props)) {
@@ -2857,14 +2152,14 @@ public class ConnectionTest extends BaseTestCase {
                 assertThrows(SQLException.class,
                         "(?i)The path '" + (tmpDir1.toString() + File.separator + "sub_12").replace("\\", "\\\\")
                                 + "' specified in 'allowLoadLocalInfileInPath' does not exist\\.",
-                        () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                        () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
             }
             try (Connection testConn = getConnectionWithProps(props)) {
                 Statement testStmt = testConn.createStatement();
                 assertThrows(SQLException.class,
                         "(?i)The path '" + (tmpDir1.toString() + File.separator + "sub_12").replace("\\", "\\\\")
                                 + "' specified in 'allowLoadLocalInfileInPath' does not exist\\.",
-                        () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                        () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + fileRef2 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
             }
         } while ((inclALLI = !inclALLI) || (inclAUILI = !inclAUILI));
 
@@ -2875,13 +2170,13 @@ public class ConnectionTest extends BaseTestCase {
         props.setProperty(PropertyKey.allowUrlInLocalInfile.getKeyName(), "true");
         try (Connection testConn = getConnectionWithProps(props)) {
             Statement testStmt = testConn.createStatement();
-            testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+            testStmt.execute("LOAD DATA LOCAL INFILE '" + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
             testAllowLoadLocalInfileInPathCheckAndDelete();
         }
         try (Connection testConn = getConnectionWithProps(props)) {
             String filePrefix = Util.isRunningOnWindows() ? "file://localhost/" : "file://localhost";
             Statement testStmt = testConn.createStatement();
-            testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + filePrefix + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
+            testStmt.execute("LOAD DATA LOCAL INFILE '" + filePrefix + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath");
             testAllowLoadLocalInfileInPathCheckAndDelete();
         }
         try (Connection testConn = getConnectionWithProps(props)) {
@@ -2890,13 +2185,13 @@ public class ConnectionTest extends BaseTestCase {
             assertThrows(SQLException.class,
                     "Cannot read from '.*'\\. Only local host names are supported when 'allowLoadLocalInfileInPath' is set\\. "
                             + "Consider using the loopback network interface \\('localhost'\\)\\.",
-                    () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + filePrefix + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                    () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + filePrefix + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
         }
         try (Connection testConn = getConnectionWithProps(props)) {
             String ftpPrefix = Util.isRunningOnWindows() ? "ftp://localhost/" : "ftp://localhost";
             Statement testStmt = testConn.createStatement();
             assertThrows(SQLException.class, "Unsupported protocol 'ftp'\\. Only protocol 'file' is supported when 'allowLoadLocalInfileInPath' is set\\.",
-                    () -> testStmt.executeQuery("LOAD DATA LOCAL INFILE '" + ftpPrefix + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
+                    () -> testStmt.execute("LOAD DATA LOCAL INFILE '" + ftpPrefix + dataPath1 + "' INTO TABLE testAllowLoadLocalInfileInPath"));
         }
     }
 
@@ -2909,20 +2204,28 @@ public class ConnectionTest extends BaseTestCase {
 
     /**
      * Tests WL#14392, Improve timeout error messages [classic].
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testTimeoutErrors() throws Exception {
+        assumeTrue((((MysqlConnection) this.conn).getSession().getServerSession().getCapabilities().getCapabilityFlags() & NativeServerSession.CLIENT_SSL) != 0,
+                "This test requires server with SSL support.");
+        assumeTrue(supportsTLSv1_2(((MysqlConnection) this.conn).getSession().getServerSession().getServerVersion()),
+                "This test requires server with TLSv1.2+ support.");
+        assumeTrue(supportsTestCertificates(this.stmt),
+                "This test requires the server configured with SSL certificates from ConnectorJ/src/test/config/ssl-test-certs");
+
         int seconds = 2;
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.REQUIRED.name()); // server reports timeout message only with SSL on
         props.setProperty(PropertyKey.sessionVariables.getKeyName(), "wait_timeout=" + seconds);
 
         Connection timeoutConn = getConnectionWithProps(props);
         Thread.sleep(1500 * seconds);
         if (versionMeetsMinimum(8, 0, 24) && !(isServerRunningOnWindows() && System.getProperty("os.name").contains("Windows"))) { // server reports timeout
             // TS.1.1 Create a connection to a MySQL configured with a short session timeout value.
-            // Sleep for a time longer than the specified timeout and assess that the error message obtained is the new one.        
+            // Sleep for a time longer than the specified timeout and assess that the error message obtained is the new one.
             assertThrows(CommunicationsException.class,
                     "The client was disconnected by the server because of inactivity. See wait_timeout and interactive_timeout for configuring this behavior.",
                     () -> timeoutConn.createStatement().executeQuery("SELECT 1"));
@@ -2950,49 +2253,149 @@ public class ConnectionTest extends BaseTestCase {
     }
 
     /**
-     * Tests fix for WL#14559, Deprecate TLS 1.0 and 1.1.
-     * 
+     * Tests WL#14805, Remove support for TLS 1.0 and 1.1.
+     *
      * @throws Exception
      */
     @Test
-    public void testTLSVersionDeprecation() throws Exception {
-        Properties props = new Properties();
-        props.setProperty(PropertyKey.sslMode.getKeyName(), "REQUIRED");
-        props.setProperty(PropertyKey.logger.getKeyName(), BufferingLogger.class.getName());
+    public void testTLSVersionRemoval() throws Exception {
+        assumeTrue((((MysqlConnection) this.conn).getSession().getServerSession().getCapabilities().getCapabilityFlags() & NativeServerSession.CLIENT_SSL) != 0,
+                "This test requires server with SSL support.");
+        assumeTrue(supportsTLSv1_2(((MysqlConnection) this.conn).getSession().getServerSession().getServerVersion()),
+                "This test requires server with TLSv1.2+ support.");
+        assumeTrue(supportsTestCertificates(this.stmt),
+                "This test requires the server configured with SSL certificates from ConnectorJ/src/test/config/ssl-test-certs");
 
-        // TS.FR1_3. Create X DevAPI connection with "sslMode=REQUIRED & enabledTLSProtocols=TLSv1,TLSv1.1".
-        //           Ensure that the deprecation warning "This connection is using TLSvX[.Y] which is now deprecated and will be removed in a future release of Connector/J." was logged.
-        // TS.FR1_4. Create X DevAPI connection with "xdevapi.ssl-mode=REQUIRED & xdevapi.tls-versions=TLSv1,TLSv1.1".
-        //           Ensure that the deprecation warning "This connection is using TLSvX[.Y] which is now deprecated and will be removed in a future release of Connector/J." was logged.
-
-        Connection con = null;
-        try {
-            // TS.FR1_1.
-            if (!versionMeetsMinimum(5, 6)) {
-                BufferingLogger.startLoggingToBuffer();
-                con = getConnectionWithProps(props);
-                assertTrue(Pattern.matches(".+ This connection is using TLSv.+ which is now deprecated and will be removed in a future release of Connector/J.",
-                        BufferingLogger.getBuffer().toString()));
-                BufferingLogger.dropBuffer();
-                con.close();
-            }
-
-            // TS.FR1_2.
-            BufferingLogger.startLoggingToBuffer();
-            props.setProperty(PropertyKey.enabledTLSProtocols.getKeyName(), "TLSv1,TLSv1.1");
-            con = getConnectionWithProps(props);
-            assertTrue(Pattern.matches(".+ This connection is using TLSv.+ which is now deprecated and will be removed in a future release of Connector/J.",
-                    BufferingLogger.getBuffer().toString()));
-            BufferingLogger.dropBuffer();
-            con.close();
-
-        } finally {
-            BufferingLogger.dropBuffer();
-            if (con != null) {
-                con.close();
-            }
+        String testCipher = "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"; // TLSv1.2 IANA Cipher name.
+        String expectedCipher = "ECDHE-RSA-AES128-GCM-SHA256"; // TLSv1.2 OpenSSL Cipher name.
+        String testTlsVersion = getHighestCommonTlsVersion(); // At least TLSv1.2 is expected to be supported.
+        if ("TLSv1.3".equalsIgnoreCase(testTlsVersion)) {
+            testCipher = "TLS_AES_256_GCM_SHA384"; // TLSv1.3 IANA Cipher name.
+            expectedCipher = "TLS_AES_256_GCM_SHA384"; // TLSv1.3 IANA Cipher name.
         }
 
+        Connection con = null;
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.REQUIRED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+
+        // TS.FR.1_1. Create a Connection with the connection property tlsVersions=TLSv1.2/TLSv1.3. Assess that the connection is created successfully and it is
+        //            using TLSv1.2/TLSv1.3.
+        props.setProperty(PropertyKey.tlsVersions.getKeyName(), testTlsVersion);
+        con = getConnectionWithProps(props);
+        assertTrue(((MysqlConnection) con).getSession().isSSLEstablished());
+        assertSessionStatusEquals(con.createStatement(), "ssl_version", testTlsVersion);
+        con.close();
+
+        // TS.FR.1_2. Create a Connection with the connection property enabledTLSProtocols=TLSv1.2/TLSv1.3. Assess that the connection is created successfully
+        //            and it is using TLSv1.2.
+        props.remove(PropertyKey.tlsVersions.getKeyName());
+        props.setProperty("enabledTLSProtocols", testTlsVersion);
+        con = getConnectionWithProps(props);
+        assertTrue(((MysqlConnection) con).getSession().isSSLEstablished());
+        assertSessionStatusEquals(con.createStatement(), "ssl_version", testTlsVersion);
+        con.close();
+        props.remove("enabledTLSProtocols");
+
+        // TS.FR.2_1. Create a Connection with the connection property tlsCiphersuites=[valid-cipher-suite]. Assess that the connection is created successfully
+        //            and it is using the cipher suite specified.
+        props.setProperty(PropertyKey.tlsCiphersuites.getKeyName(), testCipher);
+        con = getConnectionWithProps(props);
+        assertTrue(((MysqlConnection) con).getSession().isSSLEstablished());
+        assertSessionStatusEquals(con.createStatement(), "ssl_cipher", expectedCipher);
+        con.close();
+
+        // TS.FR.2_2. Create a Connection with the connection property enabledSSLCipherSuites=[valid-cipher-suite] . Assess that the connection is created
+        //            successfully and it is using the cipher suite specified.
+        props.remove(PropertyKey.tlsCiphersuites.getKeyName());
+        props.setProperty("enabledSSLCipherSuites", testCipher);
+        con = getConnectionWithProps(props);
+        assertTrue(((MysqlConnection) con).getSession().isSSLEstablished());
+        assertSessionStatusEquals(con.createStatement(), "ssl_cipher", expectedCipher);
+        con.close();
+        props.remove("enabledSSLCipherSuites");
+
+        // TS.FR.3_1. Create a Connection with the connection property tlsVersions=TLSv1. Assess that the connection fails.
+        props.setProperty(PropertyKey.tlsVersions.getKeyName(), "TLSv1");
+        assertThrows(SQLException.class, "TLS protocols TLSv1 and TLSv1.1 are not supported. Accepted values are TLSv1.2 and TLSv1.3.+",
+                () -> getConnectionWithProps(props));
+
+        // TS.FR.3_2. Create a Connection with the connection property tlsVersions=TLSv1.1. Assess that the connection fails.
+        props.setProperty(PropertyKey.tlsVersions.getKeyName(), "TLSv1.1");
+        assertThrows(SQLException.class, "TLS protocols TLSv1 and TLSv1.1 are not supported. Accepted values are TLSv1.2 and TLSv1.3.+",
+                () -> getConnectionWithProps(props));
+
+        // TS.FR.3_3. Create a Connection with the connection property enabledTLSProtocols=TLSv1. Assess that the connection fails.
+        props.setProperty("enabledTLSProtocols", "TLSv1");
+        assertThrows(SQLException.class, "TLS protocols TLSv1 and TLSv1.1 are not supported. Accepted values are TLSv1.2 and TLSv1.3.+",
+                () -> getConnectionWithProps(props));
+
+        // TS.FR.3_4. Create a Connection with the connection property enabledTLSProtocols=TLSv1.1. Assess that the connection fails.
+        props.setProperty("enabledTLSProtocols", "TLSv1.1");
+        assertThrows(SQLException.class, "TLS protocols TLSv1 and TLSv1.1 are not supported. Accepted values are TLSv1.2 and TLSv1.3.+",
+                () -> getConnectionWithProps(props));
+
+        props.remove("enabledTLSProtocols");
+
+        // TS.FR.4. Create a Connection with the connection property tlsVersions=TLSv1 and sslMode=DISABLED. Assess that the connection is created successfully
+        //          and it is not using encryption.
+        props.setProperty(PropertyKey.tlsVersions.getKeyName(), "TLSv1");
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        con = getConnectionWithProps(props);
+        assertFalse(((MysqlConnection) con).getSession().isSSLEstablished());
+        con.close();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.REQUIRED.name());
+
+        // TS.FR.5_1. Create a Connection with the connection property tlsVersions=FOO,BAR.
+        //            Assess that the connection fails with the error message "Specified list of TLS versions only contains non valid TLS protocols. Accepted
+        //            values are TLSv1.2 and TLSv1.3."
+        props.setProperty(PropertyKey.tlsVersions.getKeyName(), "FOO,BAR");
+        assertThrows(SQLException.class, "Specified list of TLS versions only contains non valid TLS protocols. Accepted values are TLSv1.2 and TLSv1.3.+",
+                () -> getConnectionWithProps(props));
+
+        props.setProperty(PropertyKey.tlsVersions.getKeyName(), "FOO,,,BAR");
+        assertThrows(SQLException.class, "Specified list of TLS versions only contains non valid TLS protocols. Accepted values are TLSv1.2 and TLSv1.3.+",
+                () -> getConnectionWithProps(props));
+
+        // TS.FR.5_2. Create a Connection with the connection property tlsVersions=FOO,TLSv1.1.
+        //            Assess that the connection fails with the error message "TLS protocols TLSv1 and TLSv1.1 are not supported. Accepted values are TLSv1.2
+        //            and TLSv1.3."
+        props.setProperty(PropertyKey.tlsVersions.getKeyName(), "FOO,TLSv1.1");
+        assertThrows(SQLException.class, "TLS protocols TLSv1 and TLSv1.1 are not supported. Accepted values are TLSv1.2 and TLSv1.3.+",
+                () -> getConnectionWithProps(props));
+
+        // TS.FR.5_3. Create a Connection with the connection property tlsVersions=TLSv1,TLSv1.1.
+        //            Assess that the connection fails with the error message "TLS protocols TLSv1 and TLSv1.1 are not supported. Accepted values are TLSv1.2
+        //            and TLSv1.3."
+        props.setProperty(PropertyKey.tlsVersions.getKeyName(), "TLSv1,TLSv1.1");
+        assertThrows(SQLException.class, "TLS protocols TLSv1 and TLSv1.1 are not supported. Accepted values are TLSv1.2 and TLSv1.3.+",
+                () -> getConnectionWithProps(props));
+
+        // TS.FR.6. Create a Connection with the connection property tlsVersions= (empty value).
+        //          Assess that the connection fails with the error message "Specified list of TLS versions is empty. Accepted values are TLSv1.2 and TLSv13."
+        props.setProperty(PropertyKey.tlsVersions.getKeyName(), "");
+        assertThrows(SQLException.class, "Specified list of TLS versions is empty. Accepted values are TLSv1.2 and TLSv1.3.+",
+                () -> getConnectionWithProps(props));
+
+        props.setProperty(PropertyKey.tlsVersions.getKeyName(), "   ");
+        assertThrows(SQLException.class, "Specified list of TLS versions is empty. Accepted values are TLSv1.2 and TLSv1.3.+",
+                () -> getConnectionWithProps(props));
+
+        props.setProperty(PropertyKey.tlsVersions.getKeyName(), ",,,");
+        assertThrows(SQLException.class, "Specified list of TLS versions is empty. Accepted values are TLSv1.2 and TLSv1.3.+",
+                () -> getConnectionWithProps(props));
+
+        props.setProperty(PropertyKey.tlsVersions.getKeyName(), ",  ,,");
+        assertThrows(SQLException.class, "Specified list of TLS versions is empty. Accepted values are TLSv1.2 and TLSv1.3.+",
+                () -> getConnectionWithProps(props));
+
+        // TS.FR.7. Create a Connection with the connection property tlsVersions=FOO,TLSv1,TLSv1.1,TLSv1.2.
+        //          Assess that the connection is created successfully and it is using TLSv1.2.
+        props.setProperty(PropertyKey.tlsVersions.getKeyName(), "FOO,TLSv1,TLSv1.1,TLSv1.2");
+        con = getConnectionWithProps(props);
+        assertTrue(((MysqlConnection) con).getSession().isSSLEstablished());
+        assertSessionStatusEquals(con.createStatement(), "ssl_version", "TLSv1.2");
+        con.close();
     }
 
 }

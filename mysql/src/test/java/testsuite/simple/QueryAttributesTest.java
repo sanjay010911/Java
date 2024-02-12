@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -73,9 +73,10 @@ import com.mysql.cj.jdbc.JdbcStatement;
 import testsuite.BaseTestCase;
 
 public class QueryAttributesTest extends BaseTestCase {
+
     @BeforeEach
     public void setUp() throws Exception {
-        assumeTrue(versionMeetsMinimum(8, 0, 26));
+        assumeTrue(versionMeetsMinimum(8, 0, 26), "MySQL 8.0.26+ is required to run this test.");
 
         this.rs = this.stmt.executeQuery("SELECT * FROM mysql.component WHERE component_urn = 'file://component_query_attributes'");
         if (!this.rs.next()) {
@@ -85,14 +86,14 @@ public class QueryAttributesTest extends BaseTestCase {
 
     @AfterEach
     public void teardown() throws Exception {
-        assumeTrue(versionMeetsMinimum(8, 0, 26));
-
-        this.stmt.execute("UNINSTALL COMPONENT 'file://component_query_attributes'");
+        if (versionMeetsMinimum(8, 0, 26)) {
+            this.stmt.execute("UNINSTALL COMPONENT 'file://component_query_attributes'");
+        }
     }
 
     /**
      * Tests all supported query attributes types when used in plain statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -180,7 +181,7 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests all supported query attributes types when used in client prepared statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -203,6 +204,8 @@ public class QueryAttributesTest extends BaseTestCase {
                 + new SimpleDateFormat("XXX").format(new Date(testInstInMilli)).replaceAll("([+-])0", "$1").replace("Z", "+0:00");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "false");
         Connection testConn = getConnectionWithProps(props);
 
@@ -276,7 +279,7 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests all supported query attributes types when used in server prepared statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -299,6 +302,8 @@ public class QueryAttributesTest extends BaseTestCase {
                 + new SimpleDateFormat("XXX").format(new Date(testInstInMilli)).replaceAll("([+-])0", "$1").replace("Z", "+0:00");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
         Connection testConn = getConnectionWithProps(props);
 
@@ -372,7 +377,7 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests all supported query attributes types when used in callable statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -466,7 +471,7 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests if query attributes are preserved between plain statement executions and cleared after calling the 'clearAttributes' method.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -497,12 +502,14 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests if query attributes are preserved between client prepared statement executions and cleared after calling the 'clearAttributes' method.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void preserveAndClearAttributesInClientPreparedStatement() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "false");
         Connection testConn = getConnectionWithProps(props);
 
@@ -535,12 +542,14 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests if query attributes are preserved between server prepared statement executions and cleared after calling the 'clearAttributes' method.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void preserveAndClearAttributesInServerPreparedStatement() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
         Connection testConn = getConnectionWithProps(props);
 
@@ -573,7 +582,7 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests if query attributes are preserved between callable statement executions and cleared after calling the 'clearAttributes' method.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -607,12 +616,14 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests if query attributes hold in plain statements with multi-queries.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void multiQueriesWithAttributesInPlainStatement() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.allowMultiQueries.getKeyName(), "true");
         Connection testConn = getConnectionWithProps(props);
 
@@ -639,12 +650,14 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests if query attributes hold in prepared statements with multi-queries.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void multiQueriesWithAttributesInPreparedStatement() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true"); // Will fall-back to client prepared statement, anyway.
         props.setProperty(PropertyKey.allowMultiQueries.getKeyName(), "true");
         Connection testConn = getConnectionWithProps(props);
@@ -673,7 +686,7 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests whether the query attributes are propagated to the internally created statement on query rewrites in plain statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -681,6 +694,8 @@ public class QueryAttributesTest extends BaseTestCase {
         createTable("testRewritePlainStmt", "(c1 VARCHAR(100), c2 VARCHAR(100))");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
         Connection testConn = getConnectionWithProps(props);
 
@@ -720,7 +735,7 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests whether the query attributes are propagated to the internally created statement on query rewrites in client prepared statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -728,6 +743,8 @@ public class QueryAttributesTest extends BaseTestCase {
         createTable("testRewriteClientPstmt", "(c1 VARCHAR(100), c2 VARCHAR(100))");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "false");
         props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
         Connection testConn = getConnectionWithProps(props);
@@ -773,7 +790,7 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests whether the query attributes are propagated to the internally created statement on query rewrites in server prepared statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -781,6 +798,8 @@ public class QueryAttributesTest extends BaseTestCase {
         createTable("testRewriteServerPstmt", "(c1 VARCHAR(100), c2 VARCHAR(100))");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
         props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
         Connection testConn = getConnectionWithProps(props);
@@ -826,12 +845,14 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests if server prepared statements get their query attributes cleared automatically when cached.
-     * 
+     *
      * @throws Exception
      */
     @Test
     void cachedServerPreparedStatementsWithQueryAttributes() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
         props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), "true");
         Connection testConn = getConnectionWithProps(props);
@@ -889,7 +910,7 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests whether proxied plain statement objects created in multi-host connections handle query attributes correctly.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -945,13 +966,15 @@ public class QueryAttributesTest extends BaseTestCase {
 
     /**
      * Tests whether proxied server prepared statement objects created in multi-host connections handle query attributes correctly.
-     * 
+     *
      * @throws Exception
      */
     @Test
     void serverPreparedStatementWithQueryAttributesInMultiHost() throws Exception {
         Properties props = new Properties();
-        props.setProperty("useServerPrepStmts", "true");
+        props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
 
         // Failover connection.
         Connection testConn = getFailoverConnection(props);
@@ -1001,4 +1024,5 @@ public class QueryAttributesTest extends BaseTestCase {
 
         testConn.close();
     }
+
 }

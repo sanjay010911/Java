@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -56,6 +56,7 @@ import java.util.HashMap;
 import javax.sql.StatementEvent;
 
 import com.mysql.cj.Messages;
+import com.mysql.cj.PreparedQuery;
 import com.mysql.cj.exceptions.MysqlErrorNumbers;
 import com.mysql.cj.jdbc.exceptions.SQLError;
 
@@ -607,16 +608,10 @@ public class PreparedStatementWrapper extends StatementWrapper implements Prepar
     @Override
     public String toString() {
         StringBuilder buf = new StringBuilder(super.toString());
-
         if (this.wrappedStmt != null) {
             buf.append(": ");
-            try {
-                buf.append(((ClientPreparedStatement) this.wrappedStmt).asSql());
-            } catch (SQLException sqlEx) {
-                buf.append("EXCEPTION: " + sqlEx.toString());
-            }
+            buf.append(((PreparedQuery) ((ClientPreparedStatement) this.wrappedStmt).getQuery()).asSql());
         }
-
         return buf.toString();
     }
 
@@ -814,7 +809,6 @@ public class PreparedStatementWrapper extends StatementWrapper implements Prepar
         } catch (SQLException sqlEx) {
             checkAndFireConnectionError(sqlEx);
         }
-
     }
 
     @Override
@@ -829,7 +823,6 @@ public class PreparedStatementWrapper extends StatementWrapper implements Prepar
         } catch (SQLException sqlEx) {
             checkAndFireConnectionError(sqlEx);
         }
-
     }
 
     @Override
@@ -844,7 +837,6 @@ public class PreparedStatementWrapper extends StatementWrapper implements Prepar
         } catch (SQLException sqlEx) {
             checkAndFireConnectionError(sqlEx);
         }
-
     }
 
     @Override
@@ -877,7 +869,6 @@ public class PreparedStatementWrapper extends StatementWrapper implements Prepar
 
     @Override
     public boolean isWrapperFor(Class<?> iface) throws SQLException {
-
         boolean isInstance = iface.isInstance(this);
 
         if (isInstance) {
@@ -886,8 +877,8 @@ public class PreparedStatementWrapper extends StatementWrapper implements Prepar
 
         String interfaceClassName = iface.getName();
 
-        return (interfaceClassName.equals("com.mysql.cj.jdbc.Statement") || interfaceClassName.equals("java.sql.Statement")
-                || interfaceClassName.equals("java.sql.Wrapper") || interfaceClassName.equals("java.sql.PreparedStatement")); // TODO check other interfaces
+        return interfaceClassName.equals("com.mysql.cj.jdbc.Statement") || interfaceClassName.equals("java.sql.Statement")
+                || interfaceClassName.equals("java.sql.Wrapper") || interfaceClassName.equals("java.sql.PreparedStatement"); // TODO check other interfaces
     }
 
     @Override
@@ -981,4 +972,5 @@ public class PreparedStatementWrapper extends StatementWrapper implements Prepar
             checkAndFireConnectionError(sqlEx);
         }
     }
+
 }

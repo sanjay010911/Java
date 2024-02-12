@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -47,6 +47,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.stream.Collectors;
 
 import com.mysql.cj.Constants;
 import com.mysql.cj.Messages;
@@ -59,6 +60,7 @@ import com.mysql.cj.exceptions.WrongArgumentException;
  * Various utility methods for the driver.
  */
 public class Util {
+
     private static int jvmVersion = 8; // use default base version supported
 
     private static int jvmUpdateNumber = -1;
@@ -86,7 +88,6 @@ public class Util {
         if (endPos > startPos) {
             jvmUpdateNumber = Integer.parseInt(Constants.JVM_VERSION.substring(startPos, endPos));
         }
-
     }
 
     public static int getJVMVersion() {
@@ -102,35 +103,37 @@ public class Util {
     }
 
     /**
-     * Checks whether the given server version string is a MySQL Community edition
-     * 
+     * Checks whether the given server version string is a MySQL Community edition.
+     *
      * @param serverVersion
      *            full server version string
-     * @return true if version does not contain "enterprise", "commercial" or "advanced"
+     * @return
+     *         true if version does not contain "enterprise", "commercial" or "advanced"
      */
     public static boolean isCommunityEdition(String serverVersion) {
         return !isEnterpriseEdition(serverVersion);
     }
 
     /**
-     * Checks whether the given server version string is a MySQL Enterprise edition
-     * 
+     * Checks whether the given server version string is a MySQL Enterprise/Commercial edition.
+     *
      * @param serverVersion
      *            full server version string
-     * @return true if version contains "enterprise", "commercial" or "advanced"
+     * @return
+     *         true if version contains "enterprise", "commercial" or "advanced"
      */
     public static boolean isEnterpriseEdition(String serverVersion) {
         return serverVersion.contains("enterprise") || serverVersion.contains("commercial") || serverVersion.contains("advanced");
     }
 
     /**
-     * Converts a nested exception into a nicer message
-     * 
+     * Converts a nested exception into a nicer message.
+     *
      * @param ex
      *            the exception to expand into a message.
-     * 
-     * @return a message containing the exception, the message (if any), and a
-     *         stacktrace.
+     *
+     * @return
+     *         a message containing the exception, the message (if any), and a stacktrace.
      */
     public static String stackTraceToString(Throwable ex) {
         StringBuilder traceBuf = new StringBuilder();
@@ -140,14 +143,12 @@ public class Util {
             traceBuf.append(ex.getClass().getName());
 
             String message = ex.getMessage();
-
             if (message != null) {
                 traceBuf.append(Messages.getString("Util.2"));
                 traceBuf.append(message);
             }
 
             StringWriter out = new StringWriter();
-
             PrintWriter printOut = new PrintWriter(out);
 
             ex.printStackTrace(printOut);
@@ -155,29 +156,52 @@ public class Util {
             traceBuf.append(Messages.getString("Util.3"));
             traceBuf.append(out.toString());
         }
-
         traceBuf.append(Messages.getString("Util.4"));
-
         return traceBuf.toString();
     }
 
-    public static Object getInstance(String className, Class<?>[] argTypes, Object[] args, ExceptionInterceptor exceptionInterceptor, String errorMessage) {
-
+    /**
+     * Creates an instance of the specified class name through reflection using the given arguments, as long as the class implements the return type specified.
+     *
+     * @param <T>
+     *            The return type of the new instance.
+     * @param returnType
+     *            the class of the return type of the new instance, usually an interface.
+     * @param className
+     *            the name of the class to instantiate through reflection.
+     * @param argTypes
+     *            the type of the arguments of the constructor to be used for instantiating the class.
+     * @param args
+     *            the arguments to supply when exectuing the new instance constructor.
+     * @param exceptionInterceptor
+     *            the {@link ExceptionInterceptor} to handle new exceptions thrown.
+     * @return
+     *         if all validations succeed, an instance of the class with the specified name.
+     */
+    @SuppressWarnings("unchecked")
+    public static <T> T getInstance(Class<T> returnType, String className, Class<?>[] argTypes, Object[] args, ExceptionInterceptor exceptionInterceptor) {
+        /*
+         * TODO: consider overloading this method with a version that uses Super Type Tokens instead of Class<T> in order to support parameterized types.
+         */
         try {
-            return handleNewInstance(Class.forName(className).getConstructor(argTypes), args, exceptionInterceptor);
-        } catch (SecurityException | NoSuchMethodException | ClassNotFoundException e) {
-            throw ExceptionFactory.createException(WrongArgumentException.class, errorMessage, e, exceptionInterceptor);
+            Class<?> clazz = Class.forName(className, false, Util.class.getClassLoader());
+            if (!returnType.isAssignableFrom(clazz)) {
+                throw ExceptionFactory.createException(WrongArgumentException.class,
+                        Messages.getString("Util.WrongImplementation", new Object[] { className, returnType.getName() }), exceptionInterceptor);
+            }
+            return handleNewInstance(((Class<T>) clazz).getConstructor(argTypes), args, exceptionInterceptor);
+        } catch (ClassNotFoundException | NoSuchMethodException | SecurityException e) {
+            throw ExceptionFactory.createException(WrongArgumentException.class, Messages.getString("Util.FailLoadClass", new Object[] { className }), e,
+                    exceptionInterceptor);
         }
     }
 
-    public static Object getInstance(String className, Class<?>[] argTypes, Object[] args, ExceptionInterceptor exceptionInterceptor) {
-        return getInstance(className, argTypes, args, exceptionInterceptor, "Can't instantiate required class");
-    }
-
     /**
-     * Handles constructing new instance with the given constructor and wrapping
-     * (or not, as required) the exceptions that could possibly be generated
-     * 
+     * Handles constructing new instance with the given constructor and wrapping (or not, as required) the exceptions that could possibly be generated.
+     *
+     * @param <T>
+     *            The type of the new class instance to return.
+     *
      * @param ctor
      *            constructor
      * @param args
@@ -186,39 +210,20 @@ public class Util {
      *            exception interceptor
      * @return object
      */
-    public static Object handleNewInstance(Constructor<?> ctor, Object[] args, ExceptionInterceptor exceptionInterceptor) {
+    public static <T> T handleNewInstance(Constructor<T> ctor, Object[] args, ExceptionInterceptor exceptionInterceptor) {
         try {
-
             return ctor.newInstance(args);
         } catch (IllegalArgumentException | InstantiationException | IllegalAccessException e) {
-            throw ExceptionFactory.createException(WrongArgumentException.class, "Can't instantiate required class", e, exceptionInterceptor);
+            throw ExceptionFactory.createException(WrongArgumentException.class,
+                    Messages.getString("Util.FailCreateInstance", new Object[] { ctor.getDeclaringClass().getName() }), e, exceptionInterceptor);
         } catch (InvocationTargetException e) {
-            Throwable target = e.getTargetException();
-
+            Throwable target = e.getCause();
             if (target instanceof ExceptionInInitializerError) {
-                target = ((ExceptionInInitializerError) target).getException();
+                target = target.getCause();
             } else if (target instanceof CJException) {
                 throw (CJException) target;
             }
-
             throw ExceptionFactory.createException(WrongArgumentException.class, target.getMessage(), target, exceptionInterceptor);
-        }
-    }
-
-    /**
-     * Does a network interface exist locally with the given hostname?
-     * 
-     * @param hostname
-     *            the hostname (or IP address in string form) to check
-     * @return true if it exists, false if no, or unable to determine due to VM
-     *         version support of java.net.NetworkInterface
-     */
-    public static boolean interfaceExists(String hostname) {
-        try {
-            Class<?> networkInterfaceClass = Class.forName("java.net.NetworkInterface");
-            return networkInterfaceClass.getMethod("getByName", (Class[]) null).invoke(networkInterfaceClass, new Object[] { hostname }) != null;
-        } catch (Throwable t) {
-            return false;
         }
     }
 
@@ -232,7 +237,6 @@ public class Util {
             Number value2 = null;
 
             if (entry.getValue() instanceof Number) {
-
                 value1 = (Number) entry.getValue();
                 value2 = (Number) map2.get(key);
             } else {
@@ -253,13 +257,13 @@ public class Util {
             } else if (value1 instanceof Short) {
                 diffMap.put(key, Short.valueOf((short) (((Short) value2).shortValue() - ((Short) value1).shortValue())));
             } else if (value1 instanceof Integer) {
-                diffMap.put(key, Integer.valueOf((((Integer) value2).intValue() - ((Integer) value1).intValue())));
+                diffMap.put(key, Integer.valueOf(((Integer) value2).intValue() - ((Integer) value1).intValue()));
             } else if (value1 instanceof Long) {
-                diffMap.put(key, Long.valueOf((((Long) value2).longValue() - ((Long) value1).longValue())));
+                diffMap.put(key, Long.valueOf(((Long) value2).longValue() - ((Long) value1).longValue()));
             } else if (value1 instanceof Float) {
                 diffMap.put(key, Float.valueOf(((Float) value2).floatValue() - ((Float) value1).floatValue()));
             } else if (value1 instanceof Double) {
-                diffMap.put(key, Double.valueOf((((Double) value2).shortValue() - ((Double) value1).shortValue())));
+                diffMap.put(key, Double.valueOf(((Double) value2).shortValue() - ((Double) value1).shortValue()));
             } else if (value1 instanceof BigDecimal) {
                 diffMap.put(key, ((BigDecimal) value2).subtract((BigDecimal) value1));
             } else if (value1 instanceof BigInteger) {
@@ -270,29 +274,14 @@ public class Util {
         return diffMap;
     }
 
-    public static <T> List<T> loadClasses(String extensionClassNames, String errorMessageKey, ExceptionInterceptor exceptionInterceptor) {
-
-        List<T> instances = new LinkedList<>();
-
-        List<String> interceptorsToCreate = StringUtils.split(extensionClassNames, ",", true);
-
-        String className = null;
-
+    public static <T> List<T> loadClasses(Class<T> instancesType, String extensionClassNames, String errorMessageKey,
+            ExceptionInterceptor exceptionInterceptor) {
         try {
-            for (int i = 0, s = interceptorsToCreate.size(); i < s; i++) {
-                className = interceptorsToCreate.get(i);
-                @SuppressWarnings("unchecked")
-                T instance = (T) Class.forName(className).newInstance();
-
-                instances.add(instance);
-            }
-
+            return StringUtils.split(extensionClassNames, ",", true).stream().filter(s -> !s.isEmpty())
+                    .map(c -> getInstance(instancesType, c, null, null, exceptionInterceptor)).collect(Collectors.toCollection(LinkedList::new));
         } catch (Throwable t) {
-            throw ExceptionFactory.createException(WrongArgumentException.class, Messages.getString(errorMessageKey, new Object[] { className }), t,
-                    exceptionInterceptor);
+            throw ExceptionFactory.createException(WrongArgumentException.class, Messages.getString(errorMessageKey), t, exceptionInterceptor);
         }
-
-        return instances;
     }
 
     /** Cache for the JDBC interfaces already verified */
@@ -300,14 +289,14 @@ public class Util {
 
     /**
      * Recursively checks for interfaces on the given class to determine if it implements a java.sql, javax.sql or com.mysql.cj.jdbc interface.
-     * 
+     *
      * @param clazz
      *            The class to investigate.
      * @return boolean
      */
     public static boolean isJdbcInterface(Class<?> clazz) {
         if (Util.isJdbcInterfaceCache.containsKey(clazz)) {
-            return (Util.isJdbcInterfaceCache.get(clazz));
+            return Util.isJdbcInterfaceCache.get(clazz);
         }
 
         if (clazz.isInterface()) {
@@ -342,7 +331,7 @@ public class Util {
 
     /**
      * Check if the package name is a known JDBC package.
-     * 
+     *
      * @param packageName
      *            The package name to check.
      * @return boolean
@@ -358,7 +347,7 @@ public class Util {
     /**
      * Retrieves a list with all interfaces implemented by the given class. If possible gets this information from a cache instead of navigating through the
      * object hierarchy. Results are stored in a cache for future reference.
-     * 
+     *
      * @param clazz
      *            The class from which the interface list will be retrieved.
      * @return
@@ -387,7 +376,7 @@ public class Util {
 
     /**
      * Computes the number of seconds elapsed since the given time in milliseconds.
-     * 
+     *
      * @param timeInMillis
      *            The past instant in milliseconds.
      * @return
@@ -399,7 +388,7 @@ public class Util {
 
     /**
      * Converts long to int, truncating to maximum/minimum value if needed.
-     * 
+     *
      * @param longValue
      *            long value
      * @return int value
@@ -410,7 +399,7 @@ public class Util {
 
     /**
      * Converts long[] to int[], truncating to maximum/minimum value if needed.
-     * 
+     *
      * @param longArray
      *            log values
      * @return int values
@@ -427,7 +416,7 @@ public class Util {
     /**
      * Returns the package name of the given class.
      * Using clazz.getPackage().getName() is not an alternative because under some class loaders the method getPackage() just returns null.
-     * 
+     *
      * @param clazz
      *            the Class from which to get the package name
      * @return the package name
@@ -443,7 +432,7 @@ public class Util {
 
     /**
      * Checks if the JVM is running on Windows Operating System.
-     * 
+     *
      * @return
      *         <code>true</code> if currently running on Windows, <code>false</code> otherwise.
      */
@@ -454,32 +443,28 @@ public class Util {
     /**
      * Reads length bytes from reader into buf. Blocks until enough input is
      * available
-     * 
+     *
      * @param reader
      *            {@link Reader}
      * @param buf
      *            char array to read into
      * @param length
      *            number of chars to read
-     * 
+     *
      * @return the actual number of chars read
-     * 
+     *
      * @throws IOException
      *             if an error occurs
      */
     public static int readFully(Reader reader, char[] buf, int length) throws IOException {
         int numCharsRead = 0;
-
         while (numCharsRead < length) {
             int count = reader.read(buf, numCharsRead, length - numCharsRead);
-
             if (count < 0) {
                 break;
             }
-
             numCharsRead += count;
         }
-
         return numCharsRead;
     }
 
@@ -494,14 +479,13 @@ public class Util {
     public static final int readBlock(InputStream i, byte[] b, int length, ExceptionInterceptor exceptionInterceptor) {
         try {
             int lengthToRead = length;
-
             if (lengthToRead > b.length) {
                 lengthToRead = b.length;
             }
-
             return i.read(b, 0, lengthToRead);
         } catch (Throwable ex) {
             throw ExceptionFactory.createException(Messages.getString("Util.5") + ex.getClass().getName(), exceptionInterceptor);
         }
     }
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -47,6 +47,7 @@ import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import com.google.protobuf.GeneratedMessageV3;
 import com.mysql.cj.Constants;
@@ -55,7 +56,6 @@ import com.mysql.cj.QueryResult;
 import com.mysql.cj.Session;
 import com.mysql.cj.TransactionEventHandler;
 import com.mysql.cj.conf.HostInfo;
-import com.mysql.cj.conf.PropertyDefinitions;
 import com.mysql.cj.conf.PropertyDefinitions.Compression;
 import com.mysql.cj.conf.PropertyDefinitions.SslMode;
 import com.mysql.cj.conf.PropertyDefinitions.XdevapiSslMode;
@@ -92,6 +92,7 @@ import com.mysql.cj.protocol.Resultset;
 import com.mysql.cj.protocol.ServerCapabilities;
 import com.mysql.cj.protocol.ServerSession;
 import com.mysql.cj.protocol.SocketConnection;
+import com.mysql.cj.protocol.ValueEncoder;
 import com.mysql.cj.protocol.a.NativeSocketConnection;
 import com.mysql.cj.protocol.x.Notice.XSessionStateChanged;
 import com.mysql.cj.result.DefaultColumnDefinition;
@@ -117,6 +118,7 @@ import com.mysql.cj.xdevapi.PreparableStatement.PreparableStatementFinalizer;
  * Low-level interface to communications with X Plugin.
  */
 public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XMessage> {
+
     private static int RETRY_PREPARE_STATEMENT_COUNTDOWN = 100;
 
     private MessageReader<XMessageHeader, XMessage> reader;
@@ -145,23 +147,11 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
 
     private Map<Class<? extends GeneratedMessageV3>, ProtocolEntityFactory<? extends ProtocolEntity, XMessage>> messageToProtocolEntityFactory = new HashMap<>();
 
-    public XProtocol(String host, int port, String defaultSchema, PropertySet propertySet) {
-
-        this.defaultSchemaName = defaultSchema;
-
-        // Override common connectTimeout with xdevapi.connect-timeout to provide unified logic in StandardSocketFactory
-        RuntimeProperty<Integer> connectTimeout = propertySet.getIntegerProperty(PropertyKey.connectTimeout);
-        RuntimeProperty<Integer> xdevapiConnectTimeout = propertySet.getIntegerProperty(PropertyKey.xdevapiConnectTimeout);
-        if (xdevapiConnectTimeout.isExplicitlySet() || !connectTimeout.isExplicitlySet()) {
-            connectTimeout.setValue(xdevapiConnectTimeout.getValue());
+    public XProtocol(HostInfo hostInfo, PropertySet propertySet) {
+        if (hostInfo == null && propertySet == null) {
+            return; // Special instance of Protocol that can be used as poison object.
         }
 
-        SocketConnection socketConn = new NativeSocketConnection();
-        socketConn.connect(host, port, propertySet, null, null, 0);
-        init(null, socketConn, propertySet, null);
-    }
-
-    public XProtocol(HostInfo hostInfo, PropertySet propertySet) {
         String host = hostInfo.getHost();
         if (host == null || StringUtils.isEmptyOrWhitespaceOnly(host)) {
             host = "localhost";
@@ -207,13 +197,14 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
         this.messageToProtocolEntityFactory.put(com.mysql.cj.x.protobuf.Mysqlx.Ok.class, new OkFactory());
     }
 
+    @Override
     public ServerSession getServerSession() {
         return this.serverSession;
     }
 
     /**
      * Set client capabilities of current session. Must be done before authentication ({@link #changeUser(String, String, String)}).
-     * 
+     *
      * @param keyValuePair
      *            capabilities name/value map
      */
@@ -223,8 +214,8 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
         readQueryResult(new OkBuilder());
     }
 
+    @Override
     public void negotiateSSLConnection() {
-
         if (!ExportControlled.enabled()) {
             throw new CJConnectionFeatureNotAvailableException();
         }
@@ -252,7 +243,6 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
         } catch (IOException e) {
             throw new XProtocolError(e.getMessage(), e);
         }
-
     }
 
     /**
@@ -278,7 +268,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
         compressionAlgorithmsList = compressionAlgorithmsList == null ? "" : compressionAlgorithmsList.trim();
         String[] compressionAlgorithmsOrder;
         String[] compressionAlgsOrder = compressionAlgorithmsList.split("\\s*,\\s*");
-        compressionAlgorithmsOrder = Arrays.stream(compressionAlgsOrder).sequential().filter(n -> n != null && n.length() > 0).map(String::toLowerCase)
+        compressionAlgorithmsOrder = Arrays.stream(compressionAlgsOrder).sequential().filter(n -> n != null && !n.isEmpty()).map(String::toLowerCase)
                 .map(CompressionAlgorithm::getNormalizedAlgorithmName).toArray(String[]::new);
 
         String compressionExtensions = this.propertySet.getStringProperty(PropertyKey.xdevapiCompressionExtensions.getKeyName()).getValue();
@@ -297,10 +287,6 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
         String algorithm = algorithmOpt.get();
         this.compressionAlgorithm = compressionAlgorithms.get(algorithm);
 
-        // Make sure the picked compression algorithm streams exist.
-        this.compressionAlgorithm.getInputStreamClass();
-        this.compressionAlgorithm.getOutputStreamClass();
-
         Map<String, Object> compressionCap = new HashMap<>();
         compressionCap.put(XServerCapabilities.SUBKEY_COMPRESSION_ALGORITHM, algorithm);
         compressionCap.put(XServerCapabilities.SUBKEY_COMPRESSION_SERVER_COMBINE_MIXED_MESSAGES, true);
@@ -309,6 +295,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
         this.compressionEnabled = true;
     }
 
+    @Override
     public void beforeHandshake() {
         this.serverSession = new XServerSession();
 
@@ -329,7 +316,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
             this.clientCapabilities.put(XServerCapabilities.KEY_SESSION_CONNECT_ATTRS, attMap);
         }
 
-        // Override JDBC (global) SSL properties with xdevapi ones to provide unified logic in ExportControlled via common SSL properties.
+        // Override JDBC (global) SSL properties with X DevAPI ones to provide unified logic in ExportControlled via common SSL properties.
         RuntimeProperty<XdevapiSslMode> xdevapiSslMode = this.propertySet.<XdevapiSslMode>getEnumProperty(PropertyKey.xdevapiSslMode);
         RuntimeProperty<SslMode> jdbcSslMode = this.propertySet.<SslMode>getEnumProperty(PropertyKey.sslMode);
         if (xdevapiSslMode.isExplicitlySet() || !jdbcSslMode.isExplicitlySet()) {
@@ -381,50 +368,21 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
             sslMode.setValue(SslMode.REQUIRED);
         }
 
-        RuntimeProperty<String> xdevapiTlsVersions = this.propertySet.getStringProperty(PropertyKey.xdevapiTlsVersions);
-        RuntimeProperty<String> jdbcEnabledTlsProtocols = this.propertySet.getStringProperty(PropertyKey.enabledTLSProtocols);
-        if (xdevapiTlsVersions.isExplicitlySet()) {
-            if (sslMode.getValue() == SslMode.DISABLED) {
-                throw ExceptionFactory.createException(WrongArgumentException.class,
-                        "Option '" + PropertyKey.xdevapiTlsVersions.getKeyName() + "' can not be specified when SSL connections are disabled.");
-            }
-            if (xdevapiTlsVersions.getValue().trim().isEmpty()) {
-                throw ExceptionFactory.createException(WrongArgumentException.class,
-                        "At least one TLS protocol version must be specified in '" + PropertyKey.xdevapiTlsVersions.getKeyName() + "' list.");
+        if (sslMode.getValue() != SslMode.DISABLED) {
+            RuntimeProperty<String> xdevapiTlsVersions = this.propertySet.getStringProperty(PropertyKey.xdevapiTlsVersions);
+            RuntimeProperty<String> jdbcEnabledTlsProtocols = this.propertySet.getStringProperty(PropertyKey.tlsVersions);
+            if (xdevapiTlsVersions.isExplicitlySet()) {
+                String[] tlsVersions = xdevapiTlsVersions.getValue().split("\\s*,\\s*");
+                List<String> tryProtocols = Arrays.asList(tlsVersions);
+                ExportControlled.checkValidProtocols(tryProtocols);
+                jdbcEnabledTlsProtocols.setValue(xdevapiTlsVersions.getValue());
             }
 
-            String[] tlsVersions = xdevapiTlsVersions.getValue().split("\\s*,\\s*");
-            List<String> tryProtocols = Arrays.asList(tlsVersions);
-            ExportControlled.checkValidProtocols(tryProtocols);
-            jdbcEnabledTlsProtocols.setValue(xdevapiTlsVersions.getValue());
-
-        } else if (!jdbcEnabledTlsProtocols.isExplicitlySet()) {
-            jdbcEnabledTlsProtocols.setValue(xdevapiTlsVersions.getValue());
-        }
-
-        RuntimeProperty<String> xdevapiTlsCiphersuites = this.propertySet.getStringProperty(PropertyKey.xdevapiTlsCiphersuites);
-        RuntimeProperty<String> jdbcEnabledSslCipherSuites = this.propertySet.getStringProperty(PropertyKey.enabledSSLCipherSuites);
-        if (xdevapiTlsCiphersuites.isExplicitlySet()) {
-            if (sslMode.getValue() == SslMode.DISABLED) {
-                throw ExceptionFactory.createException(WrongArgumentException.class,
-                        "Option '" + PropertyKey.xdevapiTlsCiphersuites.getKeyName() + "' can not be specified when SSL connections are disabled.");
+            RuntimeProperty<String> xdevapiTlsCiphersuites = this.propertySet.getStringProperty(PropertyKey.xdevapiTlsCiphersuites);
+            RuntimeProperty<String> jdbcEnabledSslCipherSuites = this.propertySet.getStringProperty(PropertyKey.tlsCiphersuites);
+            if (xdevapiTlsCiphersuites.isExplicitlySet()) {
+                jdbcEnabledSslCipherSuites.setValue(xdevapiTlsCiphersuites.getValue());
             }
-
-            jdbcEnabledSslCipherSuites.setValue(xdevapiTlsCiphersuites.getValue());
-
-        } else if (!jdbcEnabledSslCipherSuites.isExplicitlySet()) {
-            jdbcEnabledSslCipherSuites.setValue(xdevapiTlsCiphersuites.getValue());
-        }
-
-        boolean verifyServerCert = sslMode.getValue() == SslMode.VERIFY_CA || sslMode.getValue() == SslMode.VERIFY_IDENTITY;
-        String trustStoreUrl = jdbcTrustCertKeyStoreUrl.getValue();
-        if (!verifyServerCert && !StringUtils.isNullOrEmpty(trustStoreUrl)) {
-            StringBuilder msg = new StringBuilder("Incompatible security settings. The property '");
-            msg.append(PropertyKey.xdevapiSslTrustStoreUrl.getKeyName()).append("' requires '");
-            msg.append(PropertyKey.xdevapiSslMode.getKeyName()).append("' as '");
-            msg.append(PropertyDefinitions.SslMode.VERIFY_CA).append("' or '");
-            msg.append(PropertyDefinitions.SslMode.VERIFY_IDENTITY).append("'.");
-            throw new CJCommunicationsException(msg.toString());
         }
 
         if (this.clientCapabilities.size() > 0) {
@@ -441,7 +399,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
             }
         }
 
-        if (xdevapiSslMode.getValue() != XdevapiSslMode.DISABLED) {
+        if (jdbcSslMode.getValue() != SslMode.DISABLED) {
             negotiateSSLConnection();
         }
 
@@ -485,7 +443,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
     /**
      * Parses and validates the value given for the connection option 'xdevapi.compression-extensions'. With the information obtained, creates a map of
      * supported compression algorithms.
-     * 
+     *
      * @param compressionExtensions
      *            the value of the option 'xdevapi.compression-algorithm' containing a comma separated list of triplets with the format
      *            "algorithm-name:inflater-InputStream-class-name:deflater-OutputStream-class-name".
@@ -526,6 +484,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
         this.authProvider.connect(user, password, database);
     }
 
+    @Override
     public void changeUser(String user, String password, String database) {
         this.currUser = user;
         this.currPassword = password;
@@ -534,6 +493,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
         this.authProvider.changeUser(user, password, database);
     }
 
+    @Override
     public void afterHandshake() {
         // setup all required server session states
 
@@ -626,6 +586,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
         }
     }
 
+    @Override
     public <T extends QueryResult> T readQueryResult(ResultBuilder<T> resultBuilder) {
         try {
             List<Notice> notices;
@@ -659,7 +620,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
 
     /**
      * Used only in tests
-     * 
+     *
      * @return true if there are result rows
      */
     public boolean hasResults() {
@@ -687,6 +648,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
         }
     }
 
+    @Override
     public ColumnDefinition readMetadata() {
         return readMetadata(null);
     }
@@ -762,7 +724,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
 
     /**
      * Checks if the MySQL server currently connected supports prepared statements.
-     * 
+     *
      * @return
      *         {@code true} if the MySQL server currently connected supports prepared statements.
      */
@@ -772,7 +734,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
 
     /**
      * Checks if enough statements have been executed in this MySQL server so that another prepare statement attempt should be done.
-     * 
+     *
      * @return
      *         {@code true} if enough executions have been done since last time a prepared statement failed to prepare
      */
@@ -787,10 +749,10 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
     /**
      * Returns an id to be used as a client-managed prepared statement id. The method {@link #freePreparedStatementId(int)} must be called when the prepared
      * statement is deallocated so that the same id can be re-used.
-     * 
+     *
      * @param preparableStatement
      *            {@link PreparableStatement}
-     * 
+     *
      * @return a new identifier to be used as prepared statement id
      */
     public int getNewPreparedStatementId(PreparableStatement<?> preparableStatement) {
@@ -806,7 +768,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
     /**
      * Frees a prepared statement id so that it can be reused. Note that freeing an id from an active prepared statement will result in a statement prepare
      * conflict next time one gets prepared with the same released id.
-     * 
+     *
      * @param preparedStatementId
      *            the prepared statement id to release
      */
@@ -820,7 +782,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
 
     /**
      * Informs this protocol instance that preparing a statement on the connected server failed.
-     * 
+     *
      * @param preparedStatementId
      *            the id of the prepared statement that failed to prepare
      * @param e
@@ -904,6 +866,7 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
         return this.managedResource != null;
     }
 
+    @Override
     public void close() throws IOException {
         try {
             send(this.messageBuilder.buildClose(), 0);
@@ -954,9 +917,10 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
      * Get the capabilities from the server.
      * <p>
      * <b>NOTE:</b> This must be called before authentication.
-     * 
+     *
      * @return capabilities mapped by name
      */
+    @Override
     public ServerCapabilities readServerCapabilities() {
         try {
             this.sender.send(((XMessageBuilder) this.messageBuilder).buildCapabilitiesGet());
@@ -1019,11 +983,13 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
         throw ExceptionFactory.createException(CJOperationNotSupportedException.class, "Not supported");
     }
 
+    @Override
     public void changeDatabase(String database) {
         throw ExceptionFactory.createException(CJOperationNotSupportedException.class, "Not supported");
         // TODO: Figure out how this is relevant for X Protocol client Session
     }
 
+    @Override
     public boolean versionMeetsMinimum(int major, int minor, int subminor) {
         //TODO: expose this via ServerVersion so calls look like x.getServerVersion().meetsMinimum(major, minor, subminor)
         throw ExceptionFactory.createException(CJOperationNotSupportedException.class, "Not supported");
@@ -1074,4 +1040,10 @@ public class XProtocol extends AbstractProtocol<XMessage> implements Protocol<XM
     public void setQueryComment(String comment) {
         throw ExceptionFactory.createException(CJOperationNotSupportedException.class, "Not supported");
     }
+
+    @Override
+    public Supplier<ValueEncoder> getValueEncoderSupplier(Object obj) {
+        throw ExceptionFactory.createException(CJOperationNotSupportedException.class, "Not supported");
+    }
+
 }

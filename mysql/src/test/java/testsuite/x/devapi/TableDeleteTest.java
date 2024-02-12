@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -46,10 +46,9 @@ import com.mysql.cj.xdevapi.Table;
  * @todo
  */
 public class TableDeleteTest extends BaseTableTestCase {
+
     @Test
     public void testDelete() {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists testDelete");
             sqlUpdate("drop view if exists testDeleteView");
@@ -80,7 +79,7 @@ public class TableDeleteTest extends BaseTableTestCase {
 
     @Test
     public void testPreparedStatements() {
-        assumeTrue(this.isSetForXTests && mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.14")));
+        assumeTrue(mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.14")), "MySQL 8.0.14+ is required to run this test.");
 
         try {
             // Prepare test data.
@@ -321,4 +320,5 @@ public class TableDeleteTest extends BaseTableTestCase {
             assertEquals(v, rowRes.next().getInt("ord"));
         }
     }
+
 }

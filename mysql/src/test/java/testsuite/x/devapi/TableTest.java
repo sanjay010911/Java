@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -32,11 +32,9 @@ package testsuite.x.devapi;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
@@ -53,10 +51,9 @@ import com.mysql.cj.xdevapi.Table;
  * @todo
  */
 public class TableTest extends BaseTableTestCase {
+
     @Test
     public void tableBasics() {
-        assumeTrue(this.isSetForXTests);
-
         sqlUpdate("drop table if exists tableBasics");
         Table table = this.schema.getTable("tableBasics");
         assertEquals(DbObjectStatus.NOT_EXISTS, table.existsInDatabase());
@@ -72,8 +69,6 @@ public class TableTest extends BaseTableTestCase {
 
     @Test
     public void viewBasics() {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists tableBasics");
             sqlUpdate("drop view if exists viewBasics");
@@ -84,7 +79,7 @@ public class TableTest extends BaseTableTestCase {
             Table view = this.schema.getTable("viewBasics");
             assertEquals(DbObjectStatus.NOT_EXISTS, view.existsInDatabase());
 
-            // all objects return false for isView() if they don't exist in database 
+            // all objects return false for isView() if they don't exist in database
             assertFalse(table.isView());
             assertFalse(view.isView());
 
@@ -125,8 +120,6 @@ public class TableTest extends BaseTableTestCase {
 
     @Test
     public void testCount() {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists testCount");
             sqlUpdate("create table testCount (_id varchar(32), name varchar(20), birthday date, age int)");
@@ -145,18 +138,14 @@ public class TableTest extends BaseTableTestCase {
         String tableName = "testExists";
         dropCollection(tableName);
         Table t = this.schema.getTable(tableName);
-        assertThrows(XProtocolError.class, "Table '" + tableName + "' does not exist in schema '" + this.schema.getName() + "'", new Callable<Void>() {
-            public Void call() throws Exception {
-                t.count();
-                return null;
-            }
+        assertThrows(XProtocolError.class, "Table '" + tableName + "' does not exist in schema '" + this.schema.getName() + "'", () -> {
+            t.count();
+            return null;
         });
     }
 
     @Test
     public void testBug25650912() throws Exception {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists testBug25650912");
             sqlUpdate("create table testBug25650912 (x bigint,y char(220))");
@@ -169,11 +158,9 @@ public class TableTest extends BaseTableTestCase {
             assertEquals(1, row.getInt("x"));
             assertEquals("a", row.getString("y"));
 
-            assertThrows(XProtocolError.class, "ERROR 1366 \\(HY000\\) Incorrect integer value: 's' for column 'x' at row 1", new Callable<Void>() {
-                public Void call() throws Exception {
-                    table.update().set("x", 's').execute();
-                    return null;
-                }
+            assertThrows(XProtocolError.class, "ERROR 1366 \\(HY000\\) Incorrect integer value: 's' for column 'x' at row 1", () -> {
+                table.update().set("x", 's').execute();
+                return null;
             });
 
             table.update().set("x", (byte) 2).set("y", 's').execute();
@@ -199,8 +186,6 @@ public class TableTest extends BaseTableTestCase {
 
     @Test
     public void testAsyncBind() throws Exception {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists testAsyncBind");
             sqlUpdate("create table testAsyncBind(a int,b bigint,c double,d blob)");
@@ -246,4 +231,5 @@ public class TableTest extends BaseTableTestCase {
             sqlUpdate("drop table if exists testAsyncBind");
         }
     }
+
 }

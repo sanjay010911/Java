@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2022, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -27,43 +27,22 @@
  * 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-package testsuite.simple;
+package com.mysql.cj.protocol.a;
 
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import java.sql.Clob;
 
-import testsuite.BaseTestCase;
+import com.mysql.cj.BindValue;
+import com.mysql.cj.exceptions.ExceptionFactory;
 
-/**
- * Tests SSL functionality in the driver.
- */
-public class SSLTest extends BaseTestCase {
-    @BeforeEach
-    public void setUp() {
-    }
+public class ClobValueEncoder extends ReaderValueEncoder {
 
-    /**
-     * Tests SSL Connection
-     * 
-     * @throws Exception
-     */
-    @Test
-    public void testConnect() throws Exception {
-        System.setProperty("javax.net.debug", "all");
-
-        String dbUrlLocal = dbUrl;
-        dbUrlLocal = dbUrlLocal.replaceAll("(?i)useSSL", "deletedProp");
-        dbUrlLocal = dbUrlLocal.replaceAll("(?i)sslMode", "deletedProp");
-        StringBuilder sslUrl = new StringBuilder(dbUrlLocal);
-        if (dbUrl.indexOf("?") == -1) {
-            sslUrl.append("?");
-        } else {
-            sslUrl.append("&");
+    @Override
+    public byte[] getBytes(BindValue binding) {
+        try {
+            return readBytes(((Clob) binding.getValue()).getCharacterStream(), binding);
+        } catch (Throwable t) {
+            throw ExceptionFactory.createException(t.getMessage(), t, this.exceptionInterceptor);
         }
-        sslUrl.append("sslMode=REQUIRED");
-
-        getConnectionWithProps(sslUrl.toString(), "");
-
-        System.out.println("<<<<<<<<<<< Look for SSL debug output >>>>>>>>>>>");
     }
+
 }

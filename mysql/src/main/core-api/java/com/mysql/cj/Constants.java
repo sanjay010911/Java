@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -38,6 +38,7 @@ import com.mysql.cj.conf.PropertyDefinitions;
  * Represents various constants used in the driver.
  */
 public class Constants {
+
     /**
      * Avoids allocation of empty byte[] when representing 0-length strings.
      */
@@ -58,7 +59,6 @@ public class Constants {
     public static final String OS_NAME = System.getProperty(PropertyDefinitions.SYSP_os_name);
     public static final String OS_ARCH = System.getProperty(PropertyDefinitions.SYSP_os_arch);
     public static final String OS_VERSION = System.getProperty(PropertyDefinitions.SYSP_os_version);
-    public static final String PLATFORM_ENCODING = System.getProperty(PropertyDefinitions.SYSP_file_encoding);
 
     public static final String CJ_NAME = "@MYSQL_CJ_DISPLAY_PROD_NAME@";
     public static final String CJ_FULL_NAME = "@MYSQL_CJ_FULL_PROD_NAME@";
@@ -103,4 +103,5 @@ public class Constants {
      */
     private Constants() {
     }
+
 }

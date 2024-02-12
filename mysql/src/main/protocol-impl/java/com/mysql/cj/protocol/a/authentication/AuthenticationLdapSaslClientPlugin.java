@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2020, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -52,6 +52,8 @@ import javax.security.sasl.SaslClient;
 import javax.security.sasl.SaslException;
 
 import com.mysql.cj.Messages;
+import com.mysql.cj.callback.MysqlCallbackHandler;
+import com.mysql.cj.callback.UsernameCallback;
 import com.mysql.cj.conf.PropertyKey;
 import com.mysql.cj.exceptions.CJException;
 import com.mysql.cj.exceptions.ExceptionFactory;
@@ -68,18 +70,20 @@ import com.mysql.cj.util.StringUtils;
  * MySQL 'authentication_ldap_sasl_client' authentication plugin.
  */
 public class AuthenticationLdapSaslClientPlugin implements AuthenticationPlugin<NativePacketPayload> {
+
     public static String PLUGIN_NAME = "authentication_ldap_sasl_client";
 
     private static final String LOGIN_CONFIG_ENTRY = "MySQLConnectorJ";
     private static final String LDAP_SERVICE_NAME = "ldap";
 
     private enum AuthenticationMechanisms {
+
         SCRAM_SHA_1(ScramSha1SaslClient.IANA_MECHANISM_NAME, ScramSha1SaslClient.MECHANISM_NAME), //
         SCRAM_SHA_256(ScramSha256SaslClient.IANA_MECHANISM_NAME, ScramSha256SaslClient.MECHANISM_NAME), //
         GSSAPI("GSSAPI", "GSSAPI");
 
-        private String mechName;
-        private String saslServiceName;
+        private String mechName = null;
+        private String saslServiceName = null;
 
         private AuthenticationMechanisms(String mechName, String serviceName) {
             this.mechName = mechName;
@@ -102,14 +106,16 @@ public class AuthenticationLdapSaslClientPlugin implements AuthenticationPlugin<
         String getSaslServiceName() {
             return this.saslServiceName;
         }
+
     }
 
     private Protocol<?> protocol = null;
-    private String user;
-    private String password;
+    private MysqlCallbackHandler usernameCallbackHandler = null;
+    private String user = null;
+    private String password = null;
 
-    private AuthenticationMechanisms authMech;
-    private SaslClient saslClient;
+    private AuthenticationMechanisms authMech = null;
+    private SaslClient saslClient = null;
     private Subject subject = null;
 
     private boolean firstPass = true;
@@ -136,6 +142,12 @@ public class AuthenticationLdapSaslClientPlugin implements AuthenticationPlugin<
     }
 
     @Override
+    public void init(Protocol<NativePacketPayload> prot, MysqlCallbackHandler cbh) {
+        init(prot);
+        this.usernameCallbackHandler = cbh;
+    }
+
+    @Override
     public void reset() {
         if (this.saslClient != null) {
             try {
@@ -154,8 +166,9 @@ public class AuthenticationLdapSaslClientPlugin implements AuthenticationPlugin<
 
     @Override
     public void destroy() {
-        this.protocol = null;
         reset();
+        this.protocol = null;
+        this.usernameCallbackHandler = null;
     }
 
     @Override
@@ -177,6 +190,14 @@ public class AuthenticationLdapSaslClientPlugin implements AuthenticationPlugin<
     public void setAuthenticationParameters(String user, String password) {
         this.user = user;
         this.password = password;
+
+        if (this.user == null) {
+            // Fall back to system login user.
+            this.user = System.getProperty("user.name");
+            if (this.usernameCallbackHandler != null) {
+                this.usernameCallbackHandler.handle(new UsernameCallback(this.user));
+            }
+        }
     }
 
     @Override
@@ -192,8 +213,7 @@ public class AuthenticationLdapSaslClientPlugin implements AuthenticationPlugin<
                 if (this.firstPass) {
                     this.firstPass = false;
                     // Payload could be a salt (auth-plugin-data) value instead of an authentication mechanism identifier.
-                    // Give it another try in the hope of receiving a AuthSwitchRequest next time.
-                    toServer.add(new NativePacketPayload(new byte[0]));
+                    // Give it another try in the expectation of receiving a Protocol::AuthSwitchRequest or a Protocol::AuthNextFactor next time.
                     return true;
                 }
                 throw e;
@@ -226,6 +246,7 @@ public class AuthenticationLdapSaslClientPlugin implements AuthenticationPlugin<
                             final String localUser = this.user;
                             final boolean debug = Boolean.getBoolean("sun.security.jgss.debug");
                             loginConfig = new Configuration() {
+
                                 @Override
                                 public AppConfigurationEntry[] getAppConfigurationEntry(String name) {
                                     Map<String, String> options = new HashMap<>();
@@ -236,6 +257,7 @@ public class AuthenticationLdapSaslClientPlugin implements AuthenticationPlugin<
                                     return new AppConfigurationEntry[] { new AppConfigurationEntry("com.sun.security.auth.module.Krb5LoginModule",
                                             AppConfigurationEntry.LoginModuleControlFlag.REQUIRED, options) };
                                 }
+
                             };
                         }
 
@@ -251,7 +273,7 @@ public class AuthenticationLdapSaslClientPlugin implements AuthenticationPlugin<
                                     (PrivilegedExceptionAction<SaslClient>) () -> Sasl.createSaslClient(new String[] { this.authMech.getSaslServiceName() },
                                             null, LDAP_SERVICE_NAME, localLdapServerHostname, null, null));
                         } catch (PrivilegedActionException e) {
-                            // SaslException is the only checked exception that can be thrown. 
+                            // SaslException is the only checked exception that can be thrown.
                             throw (SaslException) e.getException();
                         }
                         break;
@@ -279,9 +301,9 @@ public class AuthenticationLdapSaslClientPlugin implements AuthenticationPlugin<
                 Subject.doAs(this.subject, (PrivilegedExceptionAction<Void>) () -> {
                     byte[] response = this.saslClient.evaluateChallenge(fromServer.readBytes(StringSelfDataType.STRING_EOF));
                     if (response != null) {
-                        NativePacketPayload bresp = new NativePacketPayload(response);
-                        bresp.setPosition(0);
-                        toServer.add(bresp);
+                        NativePacketPayload packet = new NativePacketPayload(response);
+                        packet.setPosition(0);
+                        toServer.add(packet);
                     }
                     return null;
                 });
@@ -293,4 +315,5 @@ public class AuthenticationLdapSaslClientPlugin implements AuthenticationPlugin<
         }
         return true;
     }
+
 }

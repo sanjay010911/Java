@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2012, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -43,10 +43,11 @@ import com.mysql.cj.util.StringUtils;
  * MySQL Clear Password Authentication Plugin
  */
 public class MysqlClearPasswordPlugin implements AuthenticationPlugin<NativePacketPayload> {
+
     public static String PLUGIN_NAME = "mysql_clear_password";
 
-    private Protocol<NativePacketPayload> protocol;
-    private MysqlCallbackHandler usernameCallbackHandler;
+    private Protocol<NativePacketPayload> protocol = null;
+    private MysqlCallbackHandler usernameCallbackHandler = null;
     private String password = null;
 
     @Override
@@ -55,41 +56,50 @@ public class MysqlClearPasswordPlugin implements AuthenticationPlugin<NativePack
         this.usernameCallbackHandler = cbh;
     }
 
+    @Override
     public void destroy() {
+        reset();
+        this.protocol = null;
+        this.usernameCallbackHandler = null;
         this.password = null;
     }
 
+    @Override
     public String getProtocolPluginName() {
         return PLUGIN_NAME;
     }
 
+    @Override
     public boolean requiresConfidentiality() {
         return true;
     }
 
+    @Override
     public boolean isReusable() {
         return true;
     }
 
+    @Override
     public void setAuthenticationParameters(String user, String password) {
         this.password = password;
-        if (user == null) {
-            // Fall-back to system login user.
+        if (user == null && this.usernameCallbackHandler != null) {
+            // Fall back to system login user.
             this.usernameCallbackHandler.handle(new UsernameCallback(System.getProperty("user.name")));
         }
     }
 
+    @Override
     public boolean nextAuthenticationStep(NativePacketPayload fromServer, List<NativePacketPayload> toServer) {
         toServer.clear();
 
         String encoding = this.protocol.getServerSession().getCharsetSettings().getPasswordCharacterEncoding();
-        NativePacketPayload bresp = new NativePacketPayload(StringUtils.getBytes(this.password != null ? this.password : "", encoding));
+        NativePacketPayload packet = new NativePacketPayload(StringUtils.getBytes(this.password != null ? this.password : "", encoding));
 
-        bresp.setPosition(bresp.getPayloadLength());
-        bresp.writeInteger(IntegerDataType.INT1, 0);
-        bresp.setPosition(0);
+        packet.setPosition(packet.getPayloadLength());
+        packet.writeInteger(IntegerDataType.INT1, 0);
+        packet.setPosition(0);
 
-        toServer.add(bresp);
+        toServer.add(packet);
         return true;
     }
 

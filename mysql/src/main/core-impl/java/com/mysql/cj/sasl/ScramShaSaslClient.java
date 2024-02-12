@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2020, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -29,6 +29,7 @@
 
 package com.mysql.cj.sasl;
 
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
@@ -48,7 +49,9 @@ import com.mysql.cj.util.StringUtils;
  * Subclasses of this class must implement the hashing algorithms for the corresponding authentication mechanism.
  */
 public abstract class ScramShaSaslClient implements SaslClient {
+
     protected enum ScramExchangeStage {
+
         TERMINATED(null), SERVER_FINAL(TERMINATED), SERVER_FIRST_CLIENT_FINAL(SERVER_FINAL), CLIENT_FIRST(SERVER_FIRST_CLIENT_FINAL);
 
         private ScramExchangeStage next;
@@ -60,6 +63,7 @@ public abstract class ScramShaSaslClient implements SaslClient {
         public ScramExchangeStage getNext() {
             return this.next == null ? this : this.next;
         }
+
     }
 
     protected static final int MINIMUM_ITERATIONS = 4096;
@@ -90,7 +94,7 @@ public abstract class ScramShaSaslClient implements SaslClient {
     /**
      * Returns the real IANA-registered mechanism name of this SASL client. This is the same as {@link SaslClient#getMechanismName()} except that subclasses may
      * use custom mechanism names to avoid future name clashes.
-     * 
+     *
      * @return
      *         a non-null string representing the IANA-registered mechanism name.
      */
@@ -130,7 +134,7 @@ public abstract class ScramShaSaslClient implements SaslClient {
 
                 case SERVER_FIRST_CLIENT_FINAL: // Process server-first-message & client-final-message.
                     // 1st part: server-first-message.
-                    String serverFirstMessage = StringUtils.toString(challenge, "UTF-8");
+                    String serverFirstMessage = StringUtils.toString(challenge, StandardCharsets.UTF_8);
                     Map<String, String> serverFirstAttributes = parseChallenge(serverFirstMessage);
 
                     if (!serverFirstAttributes.containsKey("r") || !serverFirstAttributes.containsKey("s") || !serverFirstAttributes.containsKey("i")) {
@@ -247,7 +251,7 @@ public abstract class ScramShaSaslClient implements SaslClient {
 
     /**
      * Parses a SASL challenge.
-     * 
+     *
      * @param challenge
      *            the server message (challenge) to parse.
      * @return
@@ -264,7 +268,7 @@ public abstract class ScramShaSaslClient implements SaslClient {
 
     /**
      * Generates a RFC 5802 safe nonce: "a sequence of random printable ASCII characters excluding ','"
-     * 
+     *
      * @param length
      *            the length of the nonce.
      * @return
@@ -289,7 +293,7 @@ public abstract class ScramShaSaslClient implements SaslClient {
 
     /**
      * The "H(str)" cryptographic hash function as described in <a href="https://tools.ietf.org/html/rfc5802#section-2.2">RFC 5802, Section 2.2</a>.
-     * 
+     *
      * @param str
      *            the string to hash.
      * @return
@@ -299,7 +303,7 @@ public abstract class ScramShaSaslClient implements SaslClient {
 
     /**
      * The "HMAC(key, str)" HMAC keyed hash algorithm as described in <a href="https://tools.ietf.org/html/rfc5802#section-2.2">RFC 5802, Section 2.2</a>.
-     * 
+     *
      * @param key
      *            the hash key.
      * @param str
@@ -311,14 +315,14 @@ public abstract class ScramShaSaslClient implements SaslClient {
 
     /**
      * The "Hi(str, salt, i)" PBKDF2 function as described in <a href="https://tools.ietf.org/html/rfc5802#section-2.2">RFC 5802, Section 2.2</a>.
-     * 
+     *
      * @param str
      *            the string value to use as the internal HMAC key.
      * @param salt
      *            the input string to hash in the initial iteration.
      * @param iterations
      *            the number of iterations to run the algorithm.
-     * 
+     *
      * @return
      *         an hash value with an output length equal to the length of H(str).
      */
@@ -326,7 +330,7 @@ public abstract class ScramShaSaslClient implements SaslClient {
 
     /**
      * Combines the two byte arrays in a XOR operation, changing the contents of the first.
-     * 
+     *
      * @param inOut
      *            the left operand of the XOR operation and the destination of the result.
      * @param other
@@ -340,4 +344,5 @@ public abstract class ScramShaSaslClient implements SaslClient {
         }
         return inOut;
     }
+
 }

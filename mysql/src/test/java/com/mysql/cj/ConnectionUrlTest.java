@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2016, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -77,6 +77,7 @@ import com.mysql.cj.exceptions.InvalidConnectionAttributeException;
 import com.mysql.cj.exceptions.WrongArgumentException;
 
 public class ConnectionUrlTest {
+
     protected static <EX extends Throwable> EX assertThrows(Class<EX> throwable, Callable<?> testRoutine) {
         return assertThrows("", throwable, null, testRoutine);
     }
@@ -96,14 +97,10 @@ public class ConnectionUrlTest {
         try {
             testRoutine.call();
         } catch (Throwable t) {
-            if (!throwable.isAssignableFrom(t.getClass())) {
-                fail(message + "expected exception of type '" + throwable.getName() + "' but instead a exception of type '" + t.getClass().getName()
-                        + "' was thrown.");
-            }
-
-            if (msgMatchesRegex != null && !t.getMessage().matches(msgMatchesRegex)) {
-                fail(message + "the error message «" + t.getMessage() + "» was expected to match «" + msgMatchesRegex + "».");
-            }
+            assertTrue(throwable.isAssignableFrom(t.getClass()), message + "expected exception of type '" + throwable.getName()
+                    + "' but instead a exception of type '" + t.getClass().getName() + "' was thrown.");
+            assertFalse(msgMatchesRegex != null && !t.getMessage().matches(msgMatchesRegex),
+                    message + "the error message «" + t.getMessage() + "» was expected to match «" + msgMatchesRegex + "».");
 
             return throwable.cast(t);
         }
@@ -117,7 +114,9 @@ public class ConnectionUrlTest {
      * Internal class for generating hundreds of thousands of connection strings.
      */
     private static class ConnectionStringGenerator implements Iterator<String>, Iterable<String> {
+
         enum UrlMode {
+
             SINGLE_HOST(1), OUTER_HOSTS_LIST(2), INNER_HOSTS_LIST(2);
 
             private int hostsCount;
@@ -129,6 +128,7 @@ public class ConnectionUrlTest {
             int getHostsCount() {
                 return this.hostsCount;
             }
+
         }
 
         private static final String[] PROTOCOL = new String[] { "jdbc:mysql:", "mysqlx:" };
@@ -145,7 +145,7 @@ public class ConnectionUrlTest {
                 "address=(protocol=tcp)(host=verylonghostname01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789)(port=1234)",
                 "address=(protocol=tcp)(host=verylonghostname01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789)(port=1234)(key=value%28%29)" };
         private static final String[] HOST; // Initialized below.
-        private static final String[] DB = new String[] { "", "/", "/mysql" };
+        private static final String[] DB = new String[] { "", "/", "/mysql", "/mysql%2Fcj" };
         private static final String[] PARAMS = new String[] { "", "?", "?key=value&flag", "?key=value%26&flag&26", "?file=%2Fpath%2Fto%2Ffile&flag&key=value",
                 "?file=(/path/to/file)&flag&key=value" };
 
@@ -175,7 +175,7 @@ public class ConnectionUrlTest {
 
         /**
          * Create an instance of {@link ConnectionStringGenerator} and initializes internal data for the iterator.
-         * 
+         *
          * @param urlMode
          */
         public ConnectionStringGenerator(UrlMode urlMode) {
@@ -224,7 +224,7 @@ public class ConnectionUrlTest {
 
         /**
          * Increments the counter recursively for each connection string part.
-         * 
+         *
          * @param i
          *            the part where to increment the counter
          * @return false if the counter reaches the end, true otherwise
@@ -243,7 +243,7 @@ public class ConnectionUrlTest {
 
         /**
          * Builds a connection string with the parts corresponding to the current counter position.
-         * 
+         *
          * @return the connection string built from the current counter position
          */
         private String buildConnectionString() {
@@ -290,7 +290,7 @@ public class ConnectionUrlTest {
 
         /**
          * Returns the protocol part (scheme) for the current position.
-         * 
+         *
          * @return the protocol part
          */
         public String getProtocol() {
@@ -300,7 +300,7 @@ public class ConnectionUrlTest {
 
         /**
          * Returns the user info part for the current position and the given host.
-         * 
+         *
          * @param fromHostIndex
          *            the host from where to get user info
          * @return the user info part
@@ -320,7 +320,7 @@ public class ConnectionUrlTest {
 
         /**
          * Returns the host info part for the current position and the given host.
-         * 
+         *
          * @param fromHostIndex
          *            the host from where to get host info
          * @return the host info part
@@ -342,7 +342,7 @@ public class ConnectionUrlTest {
 
         /**
          * Returns the database part for the current position.
-         * 
+         *
          * @return the database part
          */
         public String getDatabase() {
@@ -352,12 +352,12 @@ public class ConnectionUrlTest {
             } else if (this.urlMode == UrlMode.OUTER_HOSTS_LIST) {
                 counterIndex += (this.numberOfHosts - 1) * 2; // increments of two per additional host
             }
-            return DB[this.current[counterIndex]];
+            return decode(DB[this.current[counterIndex]]);
         }
 
         /**
          * Returns the connection parameters part for the current position.
-         * 
+         *
          * @return the connection parameter part
          */
         public String getParams() {
@@ -372,7 +372,7 @@ public class ConnectionUrlTest {
 
         /**
          * Checks if current host info contains the given key & value parameter.
-         * 
+         *
          * @param hostIndex
          *            the host from where the given information will be checked against
          * @param key
@@ -391,7 +391,7 @@ public class ConnectionUrlTest {
 
         /**
          * Returns the number of host specific parameters existing in the current position and the given host.
-         * 
+         *
          * @param hostIndex
          *            the host from where to get the count
          * @return the number of host specific parameters
@@ -408,7 +408,7 @@ public class ConnectionUrlTest {
 
         /**
          * Checks if the current connection properties contain the given key & value.
-         * 
+         *
          * @param key
          *            the key to check
          * @param value
@@ -425,7 +425,7 @@ public class ConnectionUrlTest {
 
         /**
          * Returns the number of connection parameters existing the the current position.
-         * 
+         *
          * @return the number of connection parameters
          */
         public int getParamsCount() {
@@ -438,7 +438,7 @@ public class ConnectionUrlTest {
 
         /**
          * Utility method to URL decode the given string.
-         * 
+         *
          * @param text
          *            the text to decode
          * @return the decoded text
@@ -467,6 +467,7 @@ public class ConnectionUrlTest {
             sb.append(", connectionString: \"").append(buildConnectionString()).append("\"}");
             return sb.toString();
         }
+
     }
 
     /**
@@ -662,9 +663,7 @@ public class ConnectionUrlTest {
                             ok = true;
                         }
                     }
-                    if (!ok) {
-                        fail(cs + ": unexpected " + e.getClass().getName() + " thrown with message: " + e.getMessage());
-                    }
+                    assertTrue(ok, cs + ": unexpected " + e.getClass().getName() + " thrown with message: " + e.getMessage());
                 }
             }
         }
@@ -672,7 +671,7 @@ public class ConnectionUrlTest {
 
     /**
      * Tests the {@link ConnectionUrlParser} and {@link ConnectionUrl} with non standard, but accepted, connection strings.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -861,12 +860,10 @@ public class ConnectionUrlTest {
         connStr.add("jdbc:mysql://johndoe:secret@myhost:1234/db?=value");
 
         for (String cs : connStr) {
-            try {
+            assertThrows(WrongArgumentException.class, () -> {
                 System.out.println(ConnectionUrl.getConnectionUrlInstance(cs, null));
-                fail(cs + ": expected to throw a " + WrongArgumentException.class.getName());
-            } catch (Exception e) {
-                assertTrue(WrongArgumentException.class.isAssignableFrom(e.getClass()), cs + ": expected to throw a " + WrongArgumentException.class.getName());
-            }
+                return null;
+            });
         }
     }
 
@@ -1002,12 +999,15 @@ public class ConnectionUrlTest {
     }
 
     public static class ConnectionPropertiesTest implements ConnectionPropertiesTransform {
+
+        @Override
         public Properties transformProperties(Properties props) {
             if (props.containsKey("stars")) {
                 props.setProperty("stars", props.getProperty("stars") + props.getProperty("stars"));
             }
             return props;
         }
+
     }
 
     /**
@@ -1673,4 +1673,5 @@ public class ConnectionUrlTest {
             assertEquals("sql_mode='IGNORE_SPACE,ANSI',FOREIGN_KEY_CHECKS=0", hi.getHostProperties().get("sessionVariables"));
         }
     }
+
 }

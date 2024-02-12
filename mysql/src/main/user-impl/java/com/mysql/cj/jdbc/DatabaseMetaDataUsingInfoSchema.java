@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2005, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -32,6 +32,7 @@ package com.mysql.cj.jdbc;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -326,7 +327,7 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
             sqlBuf.append(" AND A.TABLE_SCHEMA = ?");
         }
         sqlBuf.append(" AND A.TABLE_NAME=?");
-        sqlBuf.append(" ORDER BY A.TABLE_SCHEMA, A.TABLE_NAME, A.ORDINAL_POSITION");
+        sqlBuf.append(" ORDER BY FKTABLE_NAME, FKTABLE_NAME, KEY_SEQ");
 
         java.sql.PreparedStatement pStmt = null;
 
@@ -387,7 +388,7 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
             sqlBuf.append(" AND A.REFERENCED_TABLE_SCHEMA = ?");
         }
         sqlBuf.append(" AND A.REFERENCED_TABLE_NAME=?");
-        sqlBuf.append(" ORDER BY A.TABLE_SCHEMA, A.TABLE_NAME, A.ORDINAL_POSITION");
+        sqlBuf.append(" ORDER BY FKTABLE_NAME, FKTABLE_NAME, KEY_SEQ");
 
         java.sql.PreparedStatement pStmt = null;
 
@@ -410,26 +411,25 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
                 pStmt.close();
             }
         }
-
     }
 
     private String generateOptionalRefContraintsJoin() {
-        return ("JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS R ON (R.CONSTRAINT_NAME = B.CONSTRAINT_NAME "
-                + "AND R.TABLE_NAME = B.TABLE_NAME AND R.CONSTRAINT_SCHEMA = B.TABLE_SCHEMA) ");
+        return "JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS R ON (R.CONSTRAINT_NAME = B.CONSTRAINT_NAME "
+                + "AND R.TABLE_NAME = B.TABLE_NAME AND R.CONSTRAINT_SCHEMA = B.TABLE_SCHEMA) ";
     }
 
     private String generateDeleteRuleClause() {
-        return ("CASE WHEN R.DELETE_RULE='CASCADE' THEN " + String.valueOf(importedKeyCascade) + " WHEN R.DELETE_RULE='SET NULL' THEN "
+        return "CASE WHEN R.DELETE_RULE='CASCADE' THEN " + String.valueOf(importedKeyCascade) + " WHEN R.DELETE_RULE='SET NULL' THEN "
                 + String.valueOf(importedKeySetNull) + " WHEN R.DELETE_RULE='SET DEFAULT' THEN " + String.valueOf(importedKeySetDefault)
                 + " WHEN R.DELETE_RULE='RESTRICT' THEN " + String.valueOf(importedKeyRestrict) + " WHEN R.DELETE_RULE='NO ACTION' THEN "
-                + String.valueOf(importedKeyRestrict) + " ELSE " + String.valueOf(importedKeyRestrict) + " END ");
+                + String.valueOf(importedKeyRestrict) + " ELSE " + String.valueOf(importedKeyRestrict) + " END ";
     }
 
     private String generateUpdateRuleClause() {
-        return ("CASE WHEN R.UPDATE_RULE='CASCADE' THEN " + String.valueOf(importedKeyCascade) + " WHEN R.UPDATE_RULE='SET NULL' THEN "
+        return "CASE WHEN R.UPDATE_RULE='CASCADE' THEN " + String.valueOf(importedKeyCascade) + " WHEN R.UPDATE_RULE='SET NULL' THEN "
                 + String.valueOf(importedKeySetNull) + " WHEN R.UPDATE_RULE='SET DEFAULT' THEN " + String.valueOf(importedKeySetDefault)
                 + " WHEN R.UPDATE_RULE='RESTRICT' THEN " + String.valueOf(importedKeyRestrict) + " WHEN R.UPDATE_RULE='NO ACTION' THEN "
-                + String.valueOf(importedKeyRestrict) + " ELSE " + String.valueOf(importedKeyRestrict) + " END ");
+                + String.valueOf(importedKeyRestrict) + " ELSE " + String.valueOf(importedKeyRestrict) + " END ";
     }
 
     @Override
@@ -453,14 +453,11 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
         sqlBuf.append(generateUpdateRuleClause());
         sqlBuf.append(" AS UPDATE_RULE,");
         sqlBuf.append(generateDeleteRuleClause());
-        sqlBuf.append(" AS DELETE_RULE, A.CONSTRAINT_NAME AS FK_NAME, TC.CONSTRAINT_NAME AS PK_NAME,");
+        sqlBuf.append(" AS DELETE_RULE, A.CONSTRAINT_NAME AS FK_NAME, R.UNIQUE_CONSTRAINT_NAME AS PK_NAME,");
         sqlBuf.append(importedKeyNotDeferrable);
         sqlBuf.append(" AS DEFERRABILITY FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE A");
         sqlBuf.append(" JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS B USING (CONSTRAINT_NAME, TABLE_NAME) ");
         sqlBuf.append(generateOptionalRefContraintsJoin());
-        sqlBuf.append(" LEFT JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS TC ON (A.REFERENCED_TABLE_SCHEMA = TC.TABLE_SCHEMA");
-        sqlBuf.append("  AND A.REFERENCED_TABLE_NAME = TC.TABLE_NAME");
-        sqlBuf.append("  AND TC.CONSTRAINT_TYPE IN ('UNIQUE', 'PRIMARY KEY'))");
         sqlBuf.append("WHERE B.CONSTRAINT_TYPE = 'FOREIGN KEY'");
         if (db != null) {
             sqlBuf.append(" AND A.TABLE_SCHEMA = ?");
@@ -512,7 +509,7 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
         if (unique) {
             sqlBuf.append(" AND NON_UNIQUE=0 ");
         }
-        sqlBuf.append("ORDER BY NON_UNIQUE, INDEX_NAME, SEQ_IN_INDEX");
+        sqlBuf.append(" ORDER BY NON_UNIQUE, INDEX_NAME, SEQ_IN_INDEX");
 
         java.sql.PreparedStatement pStmt = null;
 
@@ -556,7 +553,7 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
             sqlBuf.append(" TABLE_SCHEMA = ? AND");
         }
         sqlBuf.append(" TABLE_NAME = ?");
-        sqlBuf.append(" AND INDEX_NAME='PRIMARY' ORDER BY TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX");
+        sqlBuf.append(" AND INDEX_NAME='PRIMARY' ORDER BY TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, SEQ_IN_INDEX");
 
         java.sql.PreparedStatement pStmt = null;
 
@@ -581,7 +578,6 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
 
     @Override
     public ResultSet getProcedures(String catalog, String schemaPattern, String procedureNamePattern) throws SQLException {
-
         String db = getDatabase(catalog, schemaPattern);
 
         db = this.pedantic ? db : StringUtils.unQuoteIdentifier(db, this.quotedId);
@@ -646,7 +642,6 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
 
     @Override
     public ResultSet getProcedureColumns(String catalog, String schemaPattern, String procedureNamePattern, String columnNamePattern) throws SQLException {
-
         String db = getDatabase(catalog, schemaPattern);
 
         db = this.pedantic ? db : StringUtils.unQuoteIdentifier(db, this.quotedId);
@@ -945,7 +940,6 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
 
     @Override
     public ResultSet getFunctionColumns(String catalog, String schemaPattern, String functionNamePattern, String columnNamePattern) throws SQLException {
-
         String db = getDatabase(catalog, schemaPattern);
 
         db = this.pedantic ? db : StringUtils.unQuoteIdentifier(db, this.quotedId);
@@ -1096,10 +1090,10 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
 
     /**
      * Getter to DatabaseMetaData.function* constants.
-     * 
+     *
      * @param constant
      *            the constant id from DatabaseMetaData fields to return.
-     * 
+     *
      * @return one of the java.sql.DatabaseMetaData#function* fields.
      */
     protected int getFunctionConstant(FunctionConstant constant) {
@@ -1129,7 +1123,6 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
 
     @Override
     public java.sql.ResultSet getFunctions(String catalog, String schemaPattern, String functionNamePattern) throws SQLException {
-
         String db = getDatabase(catalog, schemaPattern);
 
         db = this.pedantic ? db : StringUtils.unQuoteIdentifier(db, this.quotedId);
@@ -1208,7 +1201,6 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
     }
 
     private final void appendJdbcTypeMappingQuery(StringBuilder buf, String mysqlTypeColumnName, String fullMysqlTypeColumnName) {
-
         buf.append("CASE ");
         for (MysqlType mysqlType : MysqlType.values()) {
 
@@ -1236,7 +1228,9 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
                         buf.append(mysqlType.getJdbcType());
                     }
                     break;
-
+                case YEAR:
+                    buf.append(this.yearIsDateType ? mysqlType.getJdbcType() : Types.SMALLINT);
+                    break;
                 default:
                     buf.append(mysqlType.getJdbcType());
             }
@@ -1253,7 +1247,6 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
 
         buf.append(" ELSE 1111");
         buf.append(" END ");
-
     }
 
     @Override
@@ -1285,4 +1278,5 @@ public class DatabaseMetaDataUsingInfoSchema extends DatabaseMetaData {
         // TODO Implement with I_S
         return super.getBestRowIdentifier(catalog, schema, table, scope, nullable);
     }
+
 }

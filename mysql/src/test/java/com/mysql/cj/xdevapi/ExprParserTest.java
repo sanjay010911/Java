@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -31,8 +31,8 @@ package com.mysql.cj.xdevapi;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 import java.util.Arrays;
 import java.util.Iterator;
@@ -58,17 +58,14 @@ public class ExprParserTest {
 
     /**
      * Check that a string doesn't parse.
-     * 
+     *
      * @param s
      */
     private void checkBadParse(String s) {
-        try {
+        assertThrows(WrongArgumentException.class, () -> {
             Expr e = new ExprParser(s).parse();
             System.err.println("Parsed as: " + e);
-            fail("Expected exception while parsing: '" + s + "'");
-        } catch (WrongArgumentException ex) {
-            // expected
-        }
+        }, "Expected exception while parsing: '" + s + "'");
     }
 
     @Test
@@ -110,8 +107,8 @@ public class ExprParserTest {
     }
 
     /**
-     * Check that a string parses and is reconstituted as a string that we expect. Futher we parse the canonical version to make sure it doesn't change.
-     * 
+     * Check that a string parses and is reconstituted as a string that we expect. Further we parse the canonical version to make sure it doesn't change.
+     *
      * @param input
      * @param expected
      */
@@ -223,6 +220,10 @@ public class ExprParserTest {
         // star function
         checkParseRoundTrip("*", "*");
         checkParseRoundTrip("count(*) + 1", "(count(*) + 1)");
+        checkParseRoundTrip("foo\u003Dbar", "(foo == bar)");
+        checkParseRoundTrip("\"foo\"", "\"foo\"");
+        checkParseRoundTrip("\"foo\\\"bar\"", "\"foo\"\"bar\"");
+        checkParseRoundTrip("\"foo\nbar\"", "\"foo\nbar\""); // TODO: Could it be that the unparsed \n should be escaped?
     }
 
     /**
@@ -600,4 +601,5 @@ public class ExprParserTest {
         assertTrue(proj.get(0).hasAlias());
         assertEquals("overlaps", proj.get(0).getAlias());
     }
+
 }

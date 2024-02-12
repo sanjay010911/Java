@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -81,7 +81,7 @@ public class StandardSocketFactory implements SocketFactory {
     /**
      * Configures socket properties based on properties from the connection
      * (tcpNoDelay, snd/rcv buf, traffic class, etc).
-     * 
+     *
      * @param sock
      *            socket
      * @param pset
@@ -91,7 +91,7 @@ public class StandardSocketFactory implements SocketFactory {
      * @throws IOException
      *             if an error occurs
      */
-    private void configureSocket(Socket sock, PropertySet pset) throws SocketException, IOException {
+    protected void configureSocket(Socket sock, PropertySet pset) throws SocketException, IOException {
         sock.setTcpNoDelay(pset.getBooleanProperty(PropertyKey.tcpNoDelay).getValue());
         sock.setKeepAlive(pset.getBooleanProperty(PropertyKey.tcpKeepAlive).getValue());
 
@@ -111,22 +111,19 @@ public class StandardSocketFactory implements SocketFactory {
         }
     }
 
+    @Override
     @SuppressWarnings("unchecked")
     public <T extends Closeable> T connect(String hostname, int portNumber, PropertySet pset, int loginTimeout) throws IOException {
-
         this.loginTimeoutCountdown = loginTimeout;
 
         if (pset != null) {
             this.host = hostname;
-
             this.port = portNumber;
 
             String localSocketHostname = pset.getStringProperty(PropertyKey.localSocketAddress).getValue();
-            InetSocketAddress localSockAddr = null;
-            if (localSocketHostname != null && localSocketHostname.length() > 0) {
-                localSockAddr = new InetSocketAddress(InetAddress.getByName(localSocketHostname), 0);
-            }
-
+            InetSocketAddress localSockAddr = localSocketHostname != null && localSocketHostname.length() > 0
+                    ? new InetSocketAddress(InetAddress.getByName(localSocketHostname), 0)
+                    : null;
             int connectTimeout = pset.getIntegerProperty(PropertyKey.connectTimeout).getValue();
 
             if (this.host != null) {
@@ -177,6 +174,7 @@ public class StandardSocketFactory implements SocketFactory {
         throw new SocketException("Unable to create socket");
     }
 
+    @Override
     public void beforeHandshake() throws IOException {
         resetLoginTimeCountdown();
         this.socketTimeoutBackup = this.rawSocket.getSoTimeout();
@@ -196,6 +194,7 @@ public class StandardSocketFactory implements SocketFactory {
         return (T) this.sslSocket;
     }
 
+    @Override
     public void afterHandshake() throws IOException {
         resetLoginTimeCountdown();
         this.rawSocket.setSoTimeout(this.socketTimeoutBackup);
@@ -203,7 +202,7 @@ public class StandardSocketFactory implements SocketFactory {
 
     /**
      * Decrements elapsed time since last reset from login timeout count down.
-     * 
+     *
      * @throws SocketException
      *             If the login timeout is reached or exceeded.
      */
@@ -220,7 +219,7 @@ public class StandardSocketFactory implements SocketFactory {
 
     /**
      * Validates the connection/socket timeout that must really be used.
-     * 
+     *
      * @param expectedTimeout
      *            The timeout to validate.
      * @return The timeout to be used.
@@ -231,4 +230,5 @@ public class StandardSocketFactory implements SocketFactory {
         }
         return expectedTimeout;
     }
+
 }

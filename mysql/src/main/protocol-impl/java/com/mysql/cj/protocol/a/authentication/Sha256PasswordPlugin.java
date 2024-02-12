@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2012, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -57,10 +57,11 @@ import com.mysql.cj.protocol.a.NativePacketPayload;
 import com.mysql.cj.util.StringUtils;
 
 public class Sha256PasswordPlugin implements AuthenticationPlugin<NativePacketPayload> {
+
     public static String PLUGIN_NAME = "sha256_password";
 
-    protected Protocol<NativePacketPayload> protocol;
-    protected MysqlCallbackHandler usernameCallbackHandler;
+    protected Protocol<NativePacketPayload> protocol = null;
+    protected MysqlCallbackHandler usernameCallbackHandler = null;
     protected String password = null;
     protected String seed = null;
     protected boolean publicKeyRequested = false;
@@ -68,9 +69,9 @@ public class Sha256PasswordPlugin implements AuthenticationPlugin<NativePacketPa
     protected RuntimeProperty<String> serverRSAPublicKeyFile = null;
 
     @Override
-    public void init(Protocol<NativePacketPayload> prot, MysqlCallbackHandler mch) {
+    public void init(Protocol<NativePacketPayload> prot, MysqlCallbackHandler cbh) {
         this.protocol = prot;
-        this.usernameCallbackHandler = mch;
+        this.usernameCallbackHandler = cbh;
         this.serverRSAPublicKeyFile = this.protocol.getPropertySet().getStringProperty(PropertyKey.serverRSAPublicKeyFile);
 
         String pkURL = this.serverRSAPublicKeyFile.getValue();
@@ -79,56 +80,67 @@ public class Sha256PasswordPlugin implements AuthenticationPlugin<NativePacketPa
         }
     }
 
+    @Override
     public void destroy() {
+        reset();
+        this.protocol = null;
+        this.usernameCallbackHandler = null;
         this.password = null;
         this.seed = null;
         this.publicKeyRequested = false;
+        this.publicKeyString = null;
+        this.serverRSAPublicKeyFile = null;
     }
 
+    @Override
     public String getProtocolPluginName() {
         return PLUGIN_NAME;
     }
 
+    @Override
     public boolean requiresConfidentiality() {
         return false;
     }
 
+    @Override
     public boolean isReusable() {
         return true;
     }
 
+    @Override
     public void setAuthenticationParameters(String user, String password) {
         this.password = password;
-        if (user == null) {
-            // Fall-back to system login user.
+        if (user == null && this.usernameCallbackHandler != null) {
+            // Fall back to system login user.
             this.usernameCallbackHandler.handle(new UsernameCallback(System.getProperty("user.name")));
         }
     }
 
+    @Override
     public boolean nextAuthenticationStep(NativePacketPayload fromServer, List<NativePacketPayload> toServer) {
         toServer.clear();
 
         if (this.password == null || this.password.length() == 0 || fromServer == null) {
             // no password
-            NativePacketPayload bresp = new NativePacketPayload(new byte[] { 0 });
-            toServer.add(bresp);
+            NativePacketPayload packet = new NativePacketPayload(new byte[] { 0 });
+            toServer.add(packet);
 
         } else {
             try {
                 if (this.protocol.getSocketConnection().isSSLEstablished()) {
                     // allow plain text over SSL
-                    NativePacketPayload bresp = new NativePacketPayload(
+                    NativePacketPayload packet = new NativePacketPayload(
                             StringUtils.getBytes(this.password, this.protocol.getServerSession().getCharsetSettings().getPasswordCharacterEncoding()));
-                    bresp.setPosition(bresp.getPayloadLength());
-                    bresp.writeInteger(IntegerDataType.INT1, 0);
-                    bresp.setPosition(0);
-                    toServer.add(bresp);
+                    packet.setPosition(packet.getPayloadLength());
+                    packet.writeInteger(IntegerDataType.INT1, 0);
+                    packet.setPosition(0);
+                    toServer.add(packet);
 
                 } else if (this.serverRSAPublicKeyFile.getValue() != null) {
                     // encrypt with given key, don't use "Public Key Retrieval"
                     this.seed = fromServer.readString(StringSelfDataType.STRING_TERM, null);
-                    NativePacketPayload bresp = new NativePacketPayload(encryptPassword());
-                    toServer.add(bresp);
+                    NativePacketPayload packet = new NativePacketPayload(encryptPassword());
+                    toServer.add(packet);
 
                 } else {
                     if (!this.protocol.getPropertySet().getBooleanProperty(PropertyKey.allowPublicKeyRetrieval).getValue()) {
@@ -144,14 +156,14 @@ public class Sha256PasswordPlugin implements AuthenticationPlugin<NativePacketPa
 
                         // read key response
                         this.publicKeyString = fromServer.readString(StringSelfDataType.STRING_TERM, null);
-                        NativePacketPayload bresp = new NativePacketPayload(encryptPassword());
-                        toServer.add(bresp);
+                        NativePacketPayload packet = new NativePacketPayload(encryptPassword());
+                        toServer.add(packet);
                         this.publicKeyRequested = false;
                     } else {
                         // build and send Public Key Retrieval packet
                         this.seed = fromServer.readString(StringSelfDataType.STRING_TERM, null);
-                        NativePacketPayload bresp = new NativePacketPayload(new byte[] { 1 });
-                        toServer.add(bresp);
+                        NativePacketPayload packet = new NativePacketPayload(new byte[] { 1 });
+                        toServer.add(packet);
                         this.publicKeyRequested = true;
                     }
                 }
@@ -214,4 +226,5 @@ public class Sha256PasswordPlugin implements AuthenticationPlugin<NativePacketPa
 
         return res;
     }
+
 }

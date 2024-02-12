@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -29,9 +29,12 @@
 
 package testsuite.simple;
 
+import java.util.Properties;
+
 import org.junit.jupiter.api.Test;
 
 import com.mysql.cj.conf.PropertyDefinitions;
+import com.mysql.cj.conf.PropertyKey;
 import com.mysql.cj.jdbc.admin.MiniAdmin;
 
 import testsuite.BaseTestCase;
@@ -40,11 +43,12 @@ import testsuite.BaseTestCase;
  * Testsuite for MiniAdmin functionality.
  */
 public class MiniAdminTest extends BaseTestCase {
+
     /**
      * Tests whether or not you can shutdown the server with MiniAdmin.
-     * 
+     *
      * Only runs if SHUTDOWN_PROP is defined.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -56,11 +60,15 @@ public class MiniAdminTest extends BaseTestCase {
 
     /**
      * Tests whether or not you can construct a MiniAdmin with a JDBC URL.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testUrlConstructor() throws Exception {
-        new MiniAdmin(dbUrl);
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        new MiniAdmin(dbUrl, props);
     }
+
 }

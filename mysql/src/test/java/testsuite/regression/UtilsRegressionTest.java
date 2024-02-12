@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2014, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -36,6 +36,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.sql.SQLException;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.Calendar;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -56,11 +59,11 @@ import testsuite.BaseTestCase;
  * Regression tests for utility classes.
  */
 public class UtilsRegressionTest extends BaseTestCase {
+
     /**
      * Tests all TimeZone mappings supported.
-     * 
+     *
      * @throws Exception
-     *             if the test fails.
      */
     @Test
     public void testTimeZones() throws Exception {
@@ -68,7 +71,7 @@ public class UtilsRegressionTest extends BaseTestCase {
          * Time Zones can be identified by many different ways according to Unicode CLDR database. The following map contain the correspondence between
          * alternative Time Zone designations to Standard Time Zones ID (IANA/Olson database). This data was generated from IANA Time Zone database v. 2015f
          * (http://www.iana.org/time-zones) and Unicode CLDR v.28 (http://cldr.unicode.org/)
-         * 
+         *
          * Both the file com/mysql/cj/core/TimeZoneMapping.properties and the following data are generated from a MySQL Connector/J internal utility.
          */
         Map<String, String> tzMap = new HashMap<>();
@@ -569,7 +572,7 @@ public class UtilsRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#70436 - Incorrect mapping of windows timezone to Olson timezone.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -580,7 +583,7 @@ public class UtilsRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#82115 - Some exceptions are intercepted twice or fail to set the init cause.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -590,6 +593,7 @@ public class UtilsRegressionTest extends BaseTestCase {
         assertEquals("ORIGINAL_CAUSE", ex.getCause().getMessage());
 
         ex = SQLError.createSQLException("ORIGINAL_EXCEPTION", "0", new Exception("ORIGINAL_CAUSE"), new ExceptionInterceptor() {
+
             boolean alreadyIntercepted = false;
 
             @Override
@@ -598,6 +602,7 @@ public class UtilsRegressionTest extends BaseTestCase {
                 return this;
             }
 
+            @Override
             public void destroy() {
             }
 
@@ -612,11 +617,13 @@ public class UtilsRegressionTest extends BaseTestCase {
                 SQLException newSqlEx = new SQLException("INTERCEPT_EXCEPTION");
                 return newSqlEx;
             }
+
         });
         assertEquals("INTERCEPT_EXCEPTION", ex.getMessage());
         assertNull(ex.getCause());
 
         ex = SQLError.createSQLException("ORIGINAL_EXCEPTION", "0", new Exception("ORIGINAL_CAUSE"), new ExceptionInterceptor() {
+
             boolean alreadyIntercepted = false;
 
             @Override
@@ -625,6 +632,7 @@ public class UtilsRegressionTest extends BaseTestCase {
                 return this;
             }
 
+            @Override
             public void destroy() {
             }
 
@@ -640,6 +648,7 @@ public class UtilsRegressionTest extends BaseTestCase {
                 newSqlEx.initCause(new Exception("INTERCEPT_CAUSE"));
                 return newSqlEx;
             }
+
         });
         assertEquals("INTERCEPT_EXCEPTION", ex.getMessage());
         assertEquals("INTERCEPT_CAUSE", ex.getCause().getMessage());
@@ -647,7 +656,7 @@ public class UtilsRegressionTest extends BaseTestCase {
 
     /**
      * Test fix for Bug#20913114, STRINGUTILS.WILDCOMPARE() FAILS WITH STACKOVERFLOWERROR ERROR.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -668,4 +677,20 @@ public class UtilsRegressionTest extends BaseTestCase {
         assertFalse(StringUtils.wildCompareIgnoreCase(s1, "Srin"));
         assertFalse(StringUtils.wildCompareIgnoreCase(s1, "St%no"));
     }
+
+    /**
+     * Tests fix for Bug#104170 (33064455), CONTRIBUTION: CLIENTPREPAREDSTMT: LEAVE CALENDAR UNTOUCHED.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug104170() throws Exception {
+        Calendar cal = Calendar.getInstance();
+        long orig = cal.getTimeInMillis();
+
+        TimeUtil.getSimpleDateFormat("''yyyy-MM-dd''", cal).format(java.util.Date.from(LocalDateTime.of(1980, 1, 1, 0, 0).toInstant(ZoneOffset.UTC)));
+
+        assertEquals(orig, cal.getTimeInMillis());
+    }
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -45,8 +46,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Arrays;
 import java.util.Hashtable;
-import java.util.concurrent.Callable;
 
 import javax.naming.Context;
 import javax.naming.InitialContext;
@@ -69,7 +70,9 @@ import org.junit.jupiter.api.Test;
 
 import com.mysql.cj.MysqlConnection;
 import com.mysql.cj.conf.AbstractRuntimeProperty;
+import com.mysql.cj.conf.HostInfo;
 import com.mysql.cj.conf.PropertyDefinitions;
+import com.mysql.cj.conf.PropertyDefinitions.SslMode;
 import com.mysql.cj.conf.PropertyKey;
 import com.mysql.cj.conf.RuntimeProperty;
 import com.mysql.cj.jdbc.JdbcConnection;
@@ -88,11 +91,12 @@ import testsuite.MockJndiContextFactory;
  * Tests fixes for bugs related to datasources.
  */
 public class DataSourceRegressionTest extends BaseTestCase {
+
     private Context ctx;
 
     /**
      * Sets up this test, calling registerDataSource() to bind a DataSource into JNDI, using the FSContext JNDI provider from Sun
-     * 
+     *
      * @throws Exception
      */
     @BeforeEach
@@ -114,7 +118,7 @@ public class DataSourceRegressionTest extends BaseTestCase {
 
     /**
      * Un-binds the DataSource and closes the context
-     * 
+     *
      * @throws Exception
      */
     @AfterEach
@@ -125,13 +129,15 @@ public class DataSourceRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#4808- Calling .close() twice on a PooledConnection causes NPE.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug4808() throws Exception {
         MysqlConnectionPoolDataSource ds = new MysqlConnectionPoolDataSource();
         ds.setURL(BaseTestCase.dbUrl);
+        ds.<SslMode>getEnumProperty(PropertyKey.sslMode).setValue(SslMode.DISABLED);
+        ds.getBooleanProperty(PropertyKey.allowPublicKeyRetrieval).setValue(true);
         PooledConnection closeMeTwice = ds.getPooledConnection();
         closeMeTwice.close();
         closeMeTwice.close();
@@ -139,7 +145,7 @@ public class DataSourceRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#3848, port # alone parsed incorrectly
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -152,7 +158,7 @@ public class DataSourceRegressionTest extends BaseTestCase {
         String port = System.getProperty(PropertyDefinitions.SYSP_testsuite_ds_port);
 
         // Only run this test if at least one of the above are set
-        if ((databaseName != null) || (userName != null) || (password != null) || (port != null)) {
+        if (databaseName != null || userName != null || password != null || port != null) {
             MysqlConnectionPoolDataSource ds = new MysqlConnectionPoolDataSource();
 
             if (databaseName != null) {
@@ -199,7 +205,7 @@ public class DataSourceRegressionTest extends BaseTestCase {
 
     /**
      * Tests that we can get a connection from the DataSource bound in JNDI during test setup
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -212,69 +218,71 @@ public class DataSourceRegressionTest extends BaseTestCase {
         String port = System.getProperty(PropertyDefinitions.SYSP_testsuite_ds_port);
         String serverName = System.getProperty(PropertyDefinitions.SYSP_testsuite_ds_host);
 
-        // Only run this test if at least one of the above are set
-        if ((databaseName != null) || (serverName != null) || (userName != null) || (password != null) || (port != null)) {
-            MysqlConnectionPoolDataSource ds = new MysqlConnectionPoolDataSource();
+        assumeTrue(databaseName != null || serverName != null || userName != null || password != null || port != null,
+                "This test requires that at least one of the following properties is set:\n" + PropertyDefinitions.SYSP_testsuite_ds_db + ",\n"
+                        + PropertyDefinitions.SYSP_testsuite_ds_user + ",\n" + PropertyDefinitions.SYSP_testsuite_ds_password + ",\n"
+                        + PropertyDefinitions.SYSP_testsuite_ds_port + ",\n" + PropertyDefinitions.SYSP_testsuite_ds_host);
 
-            if (databaseName != null) {
-                ds.setDatabaseName(databaseName);
-            }
+        MysqlConnectionPoolDataSource ds = new MysqlConnectionPoolDataSource();
 
-            if (userName != null) {
-                ds.setUser(userName);
-            }
+        if (databaseName != null) {
+            ds.setDatabaseName(databaseName);
+        }
 
-            if (password != null) {
-                ds.setPassword(password);
-            }
+        if (userName != null) {
+            ds.setUser(userName);
+        }
 
-            if (port != null) {
-                ds.setPortNumber(Integer.parseInt(port));
-            }
+        if (password != null) {
+            ds.setPassword(password);
+        }
 
-            if (serverName != null) {
-                ds.setServerName(serverName);
-            }
+        if (port != null) {
+            ds.setPortNumber(Integer.parseInt(port));
+        }
 
-            bindDataSource(jndiName, ds);
+        if (serverName != null) {
+            ds.setServerName(serverName);
+        }
 
-            ConnectionPoolDataSource boundDs = null;
+        bindDataSource(jndiName, ds);
+
+        ConnectionPoolDataSource boundDs = null;
+
+        try {
+            boundDs = (ConnectionPoolDataSource) lookupDatasourceInJNDI(jndiName);
+
+            assertNotNull(boundDs, "Datasource not bound");
+
+            Connection dsCon = null;
+            Statement dsStmt = null;
 
             try {
-                boundDs = (ConnectionPoolDataSource) lookupDatasourceInJNDI(jndiName);
+                dsCon = boundDs.getPooledConnection().getConnection();
+                dsStmt = dsCon.createStatement();
+                dsStmt.executeUpdate("DROP TABLE IF EXISTS testBug3920");
+                dsStmt.executeUpdate("CREATE TABLE testBug3920 (field1 varchar(32))");
 
-                assertNotNull(boundDs, "Datasource not bound");
-
-                Connection dsCon = null;
-                Statement dsStmt = null;
-
-                try {
-                    dsCon = boundDs.getPooledConnection().getConnection();
-                    dsStmt = dsCon.createStatement();
-                    dsStmt.executeUpdate("DROP TABLE IF EXISTS testBug3920");
-                    dsStmt.executeUpdate("CREATE TABLE testBug3920 (field1 varchar(32))");
-
-                    assertNotNull(dsCon, "Connection can not be obtained from data source");
-                } finally {
-                    if (dsStmt != null) {
-                        dsStmt.executeUpdate("DROP TABLE IF EXISTS testBug3920");
-                        dsStmt.close();
-                    }
-                    if (dsCon != null) {
-                        dsCon.close();
-                    }
-                }
+                assertNotNull(dsCon, "Connection can not be obtained from data source");
             } finally {
-                if (boundDs != null) {
-                    this.ctx.unbind(jndiName);
+                if (dsStmt != null) {
+                    dsStmt.executeUpdate("DROP TABLE IF EXISTS testBug3920");
+                    dsStmt.close();
                 }
+                if (dsCon != null) {
+                    dsCon.close();
+                }
+            }
+        } finally {
+            if (boundDs != null) {
+                this.ctx.unbind(jndiName);
             }
         }
     }
 
     /**
      * Tests fix for BUG#19169 - ConnectionProperties (and thus some subclasses) are not serializable, even though some J2EE containers expect them to be.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -336,6 +344,8 @@ public class DataSourceRegressionTest extends BaseTestCase {
     public void testCSC4616() throws Exception {
         MysqlConnectionPoolDataSource ds = new MysqlConnectionPoolDataSource();
         ds.setURL(BaseTestCase.dbUrl);
+        ds.<SslMode>getEnumProperty(PropertyKey.sslMode).setValue(SslMode.DISABLED);
+        ds.getBooleanProperty(PropertyKey.allowPublicKeyRetrieval).setValue(true);
         PooledConnection pooledConn = ds.getPooledConnection();
         Connection physConn = pooledConn.getConnection();
         Statement physStatement = physConn.createStatement();
@@ -377,7 +387,7 @@ public class DataSourceRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#16791 - NullPointerException in MysqlDataSourceFactory due to Reference containing RefAddrs with null content.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -412,13 +422,15 @@ public class DataSourceRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#32101 - When using a connection from our ConnectionPoolDataSource, some Connection.prepareStatement() methods would return null instead
      * of a prepared statement.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug32101() throws Exception {
         MysqlConnectionPoolDataSource ds = new MysqlConnectionPoolDataSource();
         ds.setURL(BaseTestCase.dbUrl);
+        ds.<SslMode>getEnumProperty(PropertyKey.sslMode).setValue(SslMode.DISABLED);
+        ds.getBooleanProperty(PropertyKey.allowPublicKeyRetrieval).setValue(true);
         PooledConnection pc = ds.getPooledConnection();
         assertNotNull(pc.getConnection().prepareStatement("SELECT 1"));
         assertNotNull(pc.getConnection().prepareStatement("SELECT 1", Statement.RETURN_GENERATED_KEYS));
@@ -443,6 +455,8 @@ public class DataSourceRegressionTest extends BaseTestCase {
 
         dsUrl += "connectTimeout=" + nonDefaultConnectTimeout;
         cpds.setUrl(dsUrl);
+        cpds.<SslMode>getEnumProperty(PropertyKey.sslMode).setValue(SslMode.DISABLED);
+        cpds.getBooleanProperty(PropertyKey.allowPublicKeyRetrieval).setValue(true);
 
         Connection dsConn = cpds.getPooledConnection().getConnection();
         int configuredConnectTimeout = ((JdbcConnection) dsConn).getPropertySet().getIntegerProperty(PropertyKey.connectTimeout).getValue();
@@ -455,6 +469,8 @@ public class DataSourceRegressionTest extends BaseTestCase {
     public void testBug42267() throws Exception {
         MysqlDataSource ds = new MysqlDataSource();
         ds.setUrl(dbUrl);
+        ds.<SslMode>getEnumProperty(PropertyKey.sslMode).setValue(SslMode.DISABLED);
+        ds.getBooleanProperty(PropertyKey.allowPublicKeyRetrieval).setValue(true);
         Connection c = ds.getConnection();
         String query = "select 1,2,345";
         PreparedStatement ps = c.prepareStatement(query);
@@ -467,13 +483,15 @@ public class DataSourceRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#72890 - Java jdbc driver returns incorrect return code when it's part of XA transaction
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug72890() throws Exception {
         MysqlXADataSource myDs = new MysqlXADataSource();
         myDs.setUrl(BaseTestCase.dbUrl);
+        myDs.<SslMode>getEnumProperty(PropertyKey.sslMode).setValue(SslMode.DISABLED);
+        myDs.getBooleanProperty(PropertyKey.allowPublicKeyRetrieval).setValue(true);
 
         try {
             final Xid xid = new MysqlXid("72890".getBytes(), "72890".getBytes(), 1);
@@ -508,16 +526,12 @@ public class DataSourceRegressionTest extends BaseTestCase {
                     connAliveChecks = -1;
                 }
             }
-            if (connAliveChecks == 0) {
-                fail("Failed to kill the Connection id " + connId + " in a timely manner.");
-            }
+            assertFalse(connAliveChecks == 0, "Failed to kill the Connection id " + connId + " in a timely manner.");
 
             XAException xaEx = assertThrows(XAException.class, "Undetermined error occurred in the underlying Connection - check your data for consistency",
-                    new Callable<Void>() {
-                        public Void call() throws Exception {
-                            xaRes.commit(xid, false);
-                            return null;
-                        }
+                    () -> {
+                        xaRes.commit(xid, false);
+                        return null;
                     });
             assertEquals(XAException.XAER_RMFAIL, xaEx.errorCode, "XAException error code");
 
@@ -544,18 +558,88 @@ public class DataSourceRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#72632 - NullPointerException for invalid JDBC URL.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug72632() throws Exception {
         final MysqlDataSource dataSource = new MysqlDataSource();
         dataSource.setUrl("jdbc:mysql:nonsupported:");
-        assertThrows(SQLException.class, "Connector/J cannot handle a connection string 'jdbc:mysql:nonsupported:'.", new Callable<Void>() {
-            public Void call() throws Exception {
-                dataSource.getConnection();
-                return null;
-            }
+        assertThrows(SQLException.class, "Connector/J cannot handle a connection string 'jdbc:mysql:nonsupported:'.", () -> {
+            dataSource.getConnection();
+            return null;
         });
     }
+
+    /**
+     * Tests fix for Bug#104954 (Bug#33361205), MysqlDataSource fails to URL encode database name when constructing JDBC URL.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug104954() throws Exception {
+        createDatabase("testBug104954");
+        createDatabase("`testBug104954?bug=104954`");
+
+        HostInfo hostInfo = mainConnectionUrl.getMainHost();
+        MysqlDataSource testDataSource = new MysqlDataSource();
+        testDataSource.setServerName(hostInfo.getHost());
+        testDataSource.setPortNumber(hostInfo.getPort());
+        testDataSource.setUser(hostInfo.getUser());
+        testDataSource.setPassword(hostInfo.getPassword());
+
+        for (String db : Arrays.asList("testBug104954", "testBug104954?bug=104954")) {
+            testDataSource.setDatabaseName(db);
+
+            Connection testConn = testDataSource.getConnection();
+            Statement testStmt = testConn.createStatement();
+
+            this.rs = testStmt.executeQuery("SELECT DATABASE()");
+            assertTrue(this.rs.next());
+            if (isServerRunningOnWindows()) {
+                db = db.toLowerCase();
+            }
+            assertEquals(db, this.rs.getString(1));
+            assertFalse(this.rs.next());
+        }
+    }
+
+    /**
+     * Tests fix for Bug#91351 (Bug#28225464), MysqlConnectionPoolDataSource - autocommit status lost if global autocommit = 0.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug91351() throws Exception {
+        try {
+            createTable("testBug91351", "(txt VARCHAR(100))");
+            this.stmt.executeUpdate("SET GLOBAL autocommit=0"); // Pre-condition: global autocommit=0.
+
+            final String testDbUrl = dbUrl + (dbUrl.contains("?") ? "&" : "?");
+            boolean isParanoid = false;
+            do {
+                MysqlConnectionPoolDataSource ds = new MysqlConnectionPoolDataSource();
+                ds.setUrl(testDbUrl + "paranoid=" + isParanoid);
+                Connection testConn = ds.getPooledConnection().getConnection();
+                testConn.createStatement().execute("SET SESSION wait_timeout=5"); // Otherwise test would hang when tearing down created artifacts.
+
+                PreparedStatement testPstmt = null;
+                String query = "INSERT INTO testBug91351 VALUES (?)";
+                testPstmt = testConn.prepareStatement(query);
+                testPstmt.setString(1, "MySQL Connector/J");
+                testPstmt.executeUpdate();
+
+                testConn.close();
+
+                this.rs = this.stmt.executeQuery("SELECT * FROM testBug91351");
+                assertTrue(this.rs.next());
+                assertEquals("MySQL Connector/J", this.rs.getString(1));
+
+                testConn.close();
+            } while (isParanoid = !isParanoid);
+        } finally {
+            this.stmt.executeUpdate("SET GLOBAL autocommit=1");
+        }
+    }
+
 }

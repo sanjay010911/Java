@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -38,7 +38,6 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
@@ -67,10 +66,9 @@ import com.mysql.cj.xdevapi.SqlResult;
 import com.mysql.cj.xdevapi.XDevAPIError;
 
 public class CollectionTest extends BaseCollectionTestCase {
+
     @Test
     public void testCount() {
-        assumeTrue(this.isSetForXTests);
-
         if (!mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.5"))) {
             this.collection.add("{'_id': '1', 'a':'a'}".replaceAll("'", "\"")).execute(); // Requires manual _id.
             this.collection.add("{'_id': '2', 'b':'b'}".replaceAll("'", "\"")).execute();
@@ -87,18 +85,14 @@ public class CollectionTest extends BaseCollectionTestCase {
         String collName = "testExists";
         dropCollection(collName);
         Collection coll = this.schema.getCollection(collName);
-        assertThrows(XProtocolError.class, "Collection '" + collName + "' does not exist in schema '" + this.schema.getName() + "'", new Callable<Void>() {
-            public Void call() throws Exception {
-                coll.count();
-                return null;
-            }
+        assertThrows(XProtocolError.class, "Collection '" + collName + "' does not exist in schema '" + this.schema.getName() + "'", () -> {
+            coll.count();
+            return null;
         });
     }
 
     @Test
     public void testGetSchema() {
-        assumeTrue(this.isSetForXTests);
-
         String collName = "testExists";
         dropCollection(collName);
         Collection coll = this.schema.getCollection(collName);
@@ -108,8 +102,6 @@ public class CollectionTest extends BaseCollectionTestCase {
 
     @Test
     public void testGetSession() {
-        assumeTrue(this.isSetForXTests);
-
         String collName = "testExists";
         dropCollection(collName);
         Collection coll = this.schema.getCollection(collName);
@@ -119,8 +111,6 @@ public class CollectionTest extends BaseCollectionTestCase {
 
     @Test
     public void testExists() {
-        assumeTrue(this.isSetForXTests);
-
         String collName = "testExists";
         dropCollection(collName);
         Collection coll = this.schema.getCollection(collName);
@@ -132,8 +122,6 @@ public class CollectionTest extends BaseCollectionTestCase {
 
     @Test
     public void getNonExistentCollectionWithRequireExistsShouldThrow() {
-        assumeTrue(this.isSetForXTests);
-
         String collName = "testRequireExists";
         dropCollection(collName);
         assertThrows(WrongArgumentException.class, () -> this.schema.getCollection(collName, true));
@@ -141,8 +129,6 @@ public class CollectionTest extends BaseCollectionTestCase {
 
     @Test
     public void getNonExistentCollectionWithoutRequireExistsShouldNotThrow() {
-        assumeTrue(this.isSetForXTests);
-
         String collName = "testRequireExists";
         dropCollection(collName);
         this.schema.getCollection(collName, false);
@@ -150,8 +136,6 @@ public class CollectionTest extends BaseCollectionTestCase {
 
     @Test
     public void getExistentCollectionWithRequireExistsShouldNotThrow() {
-        assumeTrue(this.isSetForXTests);
-
         String collName = "testRequireExists";
         dropCollection(collName);
         this.schema.createCollection(collName);
@@ -160,7 +144,7 @@ public class CollectionTest extends BaseCollectionTestCase {
 
     @Test
     public void createIndex() throws Exception {
-        assumeTrue(this.isSetForXTests && mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.4")));
+        assumeTrue(mysqlVersionMeetsMinimum(ServerVersion.parseVersion("8.0.4")), "MySQL 8.0.4+ is required to run this test.");
 
         /*
          * WL#11208 - DevAPI: Collection.createIndex
@@ -280,11 +264,9 @@ public class CollectionTest extends BaseCollectionTestCase {
 
         // FR5_2 Create an index with the name of an index that already exists.
         CollectionTest.this.collection.createIndex("myUniqueIndex", "{\"fields\": [{\"field\": \"$.myField\", \"type\": \"INT\"}]}");
-        assertThrows(XProtocolError.class, "ERROR 1061 \\(42000\\) Duplicate key name 'myUniqueIndex'", new Callable<Void>() {
-            public Void call() throws Exception {
-                CollectionTest.this.collection.createIndex("myUniqueIndex", "{\"fields\": [{\"field\": \"$.myField\", \"type\": \"INT\"}]}");
-                return null;
-            }
+        assertThrows(XProtocolError.class, "ERROR 1061 \\(42000\\) Duplicate key name 'myUniqueIndex'", () -> {
+            CollectionTest.this.collection.createIndex("myUniqueIndex", "{\"fields\": [{\"field\": \"$.myField\", \"type\": \"INT\"}]}");
+            return null;
         });
         this.collection.dropIndex("myUniqueIndex");
 
@@ -371,8 +353,6 @@ public class CollectionTest extends BaseCollectionTestCase {
 
     @Test
     public void createArrayIndex() throws Exception {
-        assumeTrue(this.isSetForXTests);
-
         /*
          * WL#12247 - DevAPI: indexing array fields
          */
@@ -655,14 +635,11 @@ public class CollectionTest extends BaseCollectionTestCase {
                 } else if (array && row.getString("Expression") != null) {
                     String expr = row.getString("Expression");
                     int typePos = expr.indexOf(" as ");
-                    if (typePos >= 0) {
-                        expr = expr.substring(typePos + 4, expr.length() - 1);
-                        assertTrue(expr.endsWith("array"));
-                        expr = expr.substring(0, expr.indexOf(" array"));
-                        assertEquals(dataType, expr);
-                    } else {
-                        fail("Not an array index?");
-                    }
+                    assertTrue(typePos >= 0, "Not an array index?");
+                    expr = expr.substring(typePos + 4, expr.length() - 1);
+                    assertTrue(expr.endsWith("array"));
+                    expr = expr.substring(0, expr.indexOf(" array"));
+                    assertEquals(dataType, expr);
                 } else {
                     fail("Unexpected type of index");
                 }
@@ -683,45 +660,49 @@ public class CollectionTest extends BaseCollectionTestCase {
         int indexFound = 0;
         boolean arrayExpr = false;
 
-        Session sess = new SessionFactory().getSession(this.baseOpensslUrl);
-        SqlResult res = sess.sql("show index from `" + collName + "`").execute();
-        assertTrue(res.hasNext());
+        Session sess = null;
+        try {
+            sess = new SessionFactory().getSession(this.baseUrl);
+            SqlResult res = sess.sql("show index from `" + collName + "`").execute();
+            assertTrue(res.hasNext());
 
-        for (Row row : res.fetchAll()) {
-            if (keydName.equals(row.getString("Key_name"))) {
-                indexFound++;
-                assertEquals(collName, row.getString("Table"));
-                String expr = row.getString("Expression");
-                System.out.println(expr);
-                if (expr != null) {
-                    arrayExpr = true;
+            for (Row row : res.fetchAll()) {
+                if (keydName.equals(row.getString("Key_name"))) {
+                    indexFound++;
+                    assertEquals(collName, row.getString("Table"));
+                    String expr = row.getString("Expression");
+                    System.out.println(expr);
+                    if (expr != null) {
+                        arrayExpr = true;
+                    }
                 }
+            }
+        } finally {
+            if (sess != null) {
+                sess.close();
+                sess = null;
             }
         }
 
-        if ((indexFound != noFields) || (!arrayExpr)) {
+        if (indexFound != noFields || !arrayExpr) {
             throw new Exception("Index not matching");
         }
-
     }
 
     /**
      * START testArrayIndexBasic tests
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testArrayIndex001() throws Exception {
-        System.out.println("testCreateIndexSanity");
-
-        assumeTrue(this.isSetForXTests);
-        assumeTrue(mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.17")));
+        assumeTrue(mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.17")), "MySQL 8.0.17+ is required to run this test.");
 
         int i = 0;
         String collname = "coll1";
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -808,13 +789,14 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     /**
      * START testArrayIndexBasic tests
-     * 
+     *
      * @throws Exception
      */
 
@@ -825,7 +807,7 @@ public class CollectionTest extends BaseCollectionTestCase {
         String collname = "coll1";
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -916,21 +898,19 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     @Test
     public void testArrayIndex003() throws Exception {
-        System.out.println("testCreateIndexSanity");
-
-        assumeTrue(this.isSetForXTests);
-        assumeTrue(mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.17")));
+        assumeTrue(mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.17")), "MySQL 8.0.17+ is required to run this test.");
 
         String collname = "coll1";
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -949,21 +929,19 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     @Test
     public void testArrayIndex004() throws Exception {
-        System.out.println("testArrayIndex004");
-
-        assumeTrue(this.isSetForXTests);
-        assumeTrue(mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.17")));
+        assumeTrue(mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.17")), "MySQL 8.0.17+ is required to run this test.");
 
         String collname = "coll1";
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -1019,21 +997,19 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     @Test
     public void testArrayIndex005() throws Exception {
-        System.out.println("testArrayIndex005");
-
-        assumeTrue(this.isSetForXTests);
-        assumeTrue(mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.17")));
+        assumeTrue(mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.17")), "MySQL 8.0.17+ is required to run this test.");
 
         String collname = "coll1";
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -1087,21 +1063,19 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     @Test
     public void testArrayIndex006() throws Exception {
-        System.out.println("testCreateIndexSanity");
-
-        assumeTrue(this.isSetForXTests);
-        assumeTrue(mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.17")));
+        assumeTrue(mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.17")), "MySQL 8.0.17+ is required to run this test.");
 
         String collname = "coll1";
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -1155,21 +1129,19 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     @Test
     public void testArrayIndex007() throws Exception {
-        System.out.println("testArrayIndex007");
-
-        assumeTrue(this.isSetForXTests);
-        assumeTrue(mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.17")));
+        assumeTrue(mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.17")), "MySQL 8.0.17+ is required to run this test.");
 
         String collname = "coll1";
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -1223,21 +1195,19 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     @Test
     public void testArrayIndex008() throws Exception {
-        System.out.println("testCreateIndexSanity");
-
-        assumeTrue(this.isSetForXTests);
-        assumeTrue(mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.17")));
+        assumeTrue(mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.17")), "MySQL 8.0.17+ is required to run this test.");
 
         String collname = "coll1";
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -1280,21 +1250,19 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     @Test
     public void testArrayIndex009() throws Exception {
-        System.out.println("testArrayIndex009");
-
-        assumeTrue(this.isSetForXTests);
-        assumeTrue(mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.17")));
+        assumeTrue(mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.17")), "MySQL 8.0.17+ is required to run this test.");
 
         String collname = "coll1";
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -1346,21 +1314,19 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     @Test
     public void testArrayIndex010() throws Exception {
-        System.out.println("testArrayIndex007");
-
-        assumeTrue(this.isSetForXTests);
-        assumeTrue(mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.17")));
+        assumeTrue(mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.17")), "MySQL 8.0.17+ is required to run this test.");
 
         String collname = "coll1";
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -1389,21 +1355,19 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     @Test
     public void testArrayIndex011() throws Exception {
-        System.out.println("testCreateIndexSanity");
-
-        assumeTrue(this.isSetForXTests);
-        assumeTrue(mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.17")));
+        assumeTrue(mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.17")), "MySQL 8.0.17+ is required to run this test.");
 
         String collname = "coll1";
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -1473,7 +1437,7 @@ public class CollectionTest extends BaseCollectionTestCase {
                 assertTrue(false);
             } catch (Exception e) {
                 System.out.println("ERROR : " + e.getMessage());
-                if (mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.18"))) {
+                if (mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.18"))) {
                     assertTrue(e.getMessage().contains("Cannot store an array or an object in a scalar key part of the index"));
                 } else {
                     assertTrue(e.getMessage().contains("functional index"));
@@ -1503,25 +1467,24 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     /**
      * START testArrayIndexBasic tests
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testArrayIndex012() throws Exception {
         System.out.println("testCreateIndexSanity");
 
-        assumeTrue(this.isSetForXTests);
-
         String collname = "coll1";
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -1700,21 +1663,19 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     @Test
     public void testArrayIndex013() throws Exception {
-        System.out.println("testCreateIndexSanity");
-
-        assumeTrue(this.isSetForXTests);
-        assumeTrue(mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.17")));
+        assumeTrue(mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.17")), "MySQL 8.0.17+ is required to run this test.");
 
         String collname = "coll1";
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -1775,22 +1736,20 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     @Test
     public void testArrayIndex014() throws Exception {
-        System.out.println("testCreateIndexSanity");
-
-        assumeTrue(this.isSetForXTests);
-        assumeTrue(mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.17")));
+        assumeTrue(mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.17")), "MySQL 8.0.17+ is required to run this test.");
 
         String collname = "coll1";
         DbDoc doc = null;
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -1915,7 +1874,7 @@ public class CollectionTest extends BaseCollectionTestCase {
             i = 0;
             while (docs.hasNext()) {
                 doc = docs.next();
-                System.out.println((((JsonString) doc.get("dateFieldWOI")).getString()));
+                System.out.println(((JsonString) doc.get("dateFieldWOI")).getString());
                 i++;
             }
             System.out.println("Using NOT IN Without Index");
@@ -2052,22 +2011,20 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     @Test
     public void testArrayIndex015() throws Exception {
-        System.out.println("Integration scenarios with both operands as keys and index created on them");
-
-        assumeTrue(this.isSetForXTests);
-        assumeTrue(mysqlVersionMeetsMinimum(this.baseOpensslUrl, ServerVersion.parseVersion("8.0.17")));
+        assumeTrue(mysqlVersionMeetsMinimum(this.baseUrl, ServerVersion.parseVersion("8.0.17")), "MySQL 8.0.17+ is required to run this test.");
 
         String collname = "coll1";
         DbDoc doc = null;
         Session sess = null;
         try {
-            sess = new SessionFactory().getSession(this.baseOpensslUrl);
+            sess = new SessionFactory().getSession(this.baseUrl);
             Schema sch = sess.getDefaultSchema();
             sch.dropCollection(collname);
             Collection coll = sch.createCollection(collname, true);
@@ -2233,14 +2190,13 @@ public class CollectionTest extends BaseCollectionTestCase {
         } finally {
             if (sess != null) {
                 sess.close();
+                sess = null;
             }
         }
     }
 
     @Test
     public void testAsyncBind() throws Exception {
-        assumeTrue(this.isSetForXTests);
-
         int i = 0, maxrec = 10;
         DbDoc[] jsonlist = new DbDocImpl[maxrec];
 
@@ -2276,14 +2232,14 @@ public class CollectionTest extends BaseCollectionTestCase {
 
         DocResult docs = asyncDocs.get();
         DbDoc doc = docs.next();
-        assertEquals((long) 103, (long) (((JsonNumber) doc.get("F3")).getInteger()));
+        assertEquals((long) 103, (long) ((JsonNumber) doc.get("F3")).getInteger());
         assertFalse(docs.hasNext());
 
         // 6. bind In different order (Success)
         asyncDocs = this.collection.find("F1 like :X and $.F3 =:Y and  $.F3 !=:Z").bind("Y", 103).bind("Z", 104).bind("X", "Field-1-%-3").executeAsync();
         docs = asyncDocs.get();
         doc = docs.next();
-        assertEquals((long) 103, (long) (((JsonNumber) doc.get("F3")).getInteger()));
+        assertEquals((long) 103, (long) ((JsonNumber) doc.get("F3")).getInteger());
         assertFalse(docs.hasNext());
 
         // 7. Using same Bind Variables many times(Success)
@@ -2291,7 +2247,7 @@ public class CollectionTest extends BaseCollectionTestCase {
                 .executeAsync();
         docs = asyncDocs.get();
         doc = docs.next();
-        assertEquals((long) 103, (long) (((JsonNumber) doc.get("F3")).getInteger()));
+        assertEquals((long) 103, (long) ((JsonNumber) doc.get("F3")).getInteger());
         assertFalse(docs.hasNext());
 
         // 1. Incorrect PlaceHolder Name in bind
@@ -2369,8 +2325,6 @@ public class CollectionTest extends BaseCollectionTestCase {
 
     @Test
     public void testFetchOneFetchAllAsync() throws Exception {
-        assumeTrue(this.isSetForXTests);
-
         int i = 0, maxrec = 10;
         CompletableFuture<DocResult> asyncDocs = null;
         List<DbDoc> rowDoc = null;
@@ -2399,7 +2353,7 @@ public class CollectionTest extends BaseCollectionTestCase {
 
         i = 0;
         while (doc != null) {
-            assertEquals((long) (100 + i), (long) (((JsonNumber) doc.get("F3")).getInteger()));
+            assertEquals((long) (100 + i), (long) ((JsonNumber) doc.get("F3")).getInteger());
             i = i + 1;
             doc = docs1.fetchOne();
         }
@@ -2413,7 +2367,7 @@ public class CollectionTest extends BaseCollectionTestCase {
         assertThrows(WrongArgumentException.class, "Cannot fetchAll\\(\\) after starting iteration", () -> docs2.fetchAll());
         i = 0;
         do {
-            assertEquals((long) (100 + i), (long) (((JsonNumber) doc.get("F3")).getInteger()));
+            assertEquals((long) (100 + i), (long) ((JsonNumber) doc.get("F3")).getInteger());
             i = i + 1;
             doc = docs2.next();
         } while (docs2.hasNext());
@@ -2430,7 +2384,7 @@ public class CollectionTest extends BaseCollectionTestCase {
             } else {
                 doc = docs3.fetchOne();
             }
-            assertEquals((long) (100 + i), (long) (((JsonNumber) doc.get("F3")).getInteger()));
+            assertEquals((long) (100 + i), (long) ((JsonNumber) doc.get("F3")).getInteger());
             i = i + 1;
 
         }
@@ -2444,7 +2398,7 @@ public class CollectionTest extends BaseCollectionTestCase {
         assertEquals((long) 5, (long) rowDoc.size());
         for (i = 0; i < rowDoc.size(); i++) {
             doc = rowDoc.get(i);
-            assertEquals((long) (100 + i), (long) (((JsonNumber) doc.get("F3")).getInteger()));
+            assertEquals((long) (100 + i), (long) ((JsonNumber) doc.get("F3")).getInteger());
         }
         doc = docs.fetchOne();
     }
@@ -2452,8 +2406,6 @@ public class CollectionTest extends BaseCollectionTestCase {
     @SuppressWarnings({ "deprecation", "unchecked" })
     @Test
     public void testCollectionAddModifyRemoveAsync() throws Exception {
-        assumeTrue(this.isSetForXTests);
-
         int i = 0;
         int NUMBER_OF_QUERIES = 5000;
         DbDoc doc = null;
@@ -2511,7 +2463,7 @@ public class CollectionTest extends BaseCollectionTestCase {
                 docs = ((CompletableFuture<DocResult>) futures.get(i)).get();
                 assertTrue(docs.hasNext());
                 doc = docs.next();
-                assertEquals((long) (10), (long) (((JsonNumber) doc.get("T")).getInteger()));
+                assertEquals((long) 10, (long) ((JsonNumber) doc.get("T")).getInteger());
                 assertFalse(docs.hasNext());
             } else if (i % 10 == 3) {
                 assertThrows(ExecutionException.class, ".*Document contains a field value that is not unique but required to be.*",
@@ -2539,13 +2491,14 @@ public class CollectionTest extends BaseCollectionTestCase {
         }
 
         if ((NUMBER_OF_QUERIES - 1) % 10 < 9) {
-            assertEquals((1), this.collection.count());
+            assertEquals(1, this.collection.count());
             asyncDocs = this.collection.find("$.T = :X ").bind("X", 10).fields(expr("{'cnt':count($.T)}")).executeAsync();
             docs = asyncDocs.get();
             doc = docs.next();
-            assertEquals((long) (1), (long) (((JsonNumber) doc.get("cnt")).getInteger()));
+            assertEquals((long) 1, (long) ((JsonNumber) doc.get("cnt")).getInteger());
         } else {
-            assertEquals((0), this.collection.count());
+            assertEquals(0, this.collection.count());
         }
     }
+
 }

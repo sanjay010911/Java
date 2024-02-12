@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -29,6 +29,8 @@
 
 package testsuite.regression;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -44,6 +46,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.CharArrayReader;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -51,12 +54,13 @@ import java.io.InputStream;
 import java.io.PrintStream;
 import java.io.Reader;
 import java.io.StringReader;
-import java.io.UnsupportedEncodingException;
 import java.io.Writer;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.sql.Array;
 import java.sql.BatchUpdateException;
 import java.sql.Blob;
@@ -66,6 +70,7 @@ import java.sql.Connection;
 import java.sql.DataTruncation;
 import java.sql.Date;
 import java.sql.NClob;
+import java.sql.ParameterMetaData;
 import java.sql.PreparedStatement;
 import java.sql.Ref;
 import java.sql.ResultSet;
@@ -102,6 +107,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
 
@@ -114,10 +120,13 @@ import org.junit.jupiter.api.Test;
 import com.mysql.cj.CharsetMappingWrapper;
 import com.mysql.cj.ClientPreparedQuery;
 import com.mysql.cj.MysqlConnection;
+import com.mysql.cj.MysqlType;
 import com.mysql.cj.Query;
 import com.mysql.cj.ServerPreparedQuery;
 import com.mysql.cj.Session;
+import com.mysql.cj.conf.PropertyDefinitions;
 import com.mysql.cj.conf.PropertyDefinitions.DatabaseTerm;
+import com.mysql.cj.conf.PropertyDefinitions.SslMode;
 import com.mysql.cj.conf.PropertyKey;
 import com.mysql.cj.exceptions.CJCommunicationsException;
 import com.mysql.cj.exceptions.ExceptionFactory;
@@ -142,21 +151,27 @@ import com.mysql.cj.jdbc.result.CachedResultSetMetaData;
 import com.mysql.cj.jdbc.result.ResultSetInternalMethods;
 import com.mysql.cj.log.Log;
 import com.mysql.cj.protocol.ColumnDefinition;
+import com.mysql.cj.protocol.Message;
 import com.mysql.cj.protocol.Resultset;
 import com.mysql.cj.protocol.ResultsetRows;
 import com.mysql.cj.protocol.ServerSession;
+import com.mysql.cj.protocol.a.NativeServerSession;
 import com.mysql.cj.util.LRUCache;
+import com.mysql.cj.util.StringUtils;
 import com.mysql.cj.util.TimeUtil;
 
 import testsuite.BaseQueryInterceptor;
 import testsuite.BaseTestCase;
 import testsuite.UnreliableSocketFactory;
+import testsuite.simple.StatementsTest;
 
 /**
  * Regression tests for the Statement class
  */
 public class StatementRegressionTest extends BaseTestCase {
+
     class PrepareThread extends Thread {
+
         Connection c;
 
         PrepareThread(Connection cn) {
@@ -178,6 +193,7 @@ public class StatementRegressionTest extends BaseTestCase {
                 }
             }
         }
+
     }
 
     static int count = 0;
@@ -375,24 +391,14 @@ public class StatementRegressionTest extends BaseTestCase {
         assertFalse(this.rs.next());
     }
 
-    private String getByteArrayString(byte[] ba) {
-        StringBuilder buffer = new StringBuilder();
-        if (ba != null) {
-            for (int i = 0; i < ba.length; i++) {
-                buffer.append("0x" + Integer.toHexString(ba[i] & 0xff) + " ");
-            }
-        } else {
-            buffer.append("null");
-        }
-        return buffer.toString();
-    }
-
     /**
      * @param continueBatchOnError
      * @throws SQLException
      */
     private void innerBug6823(boolean continueBatchOnError) throws SQLException {
         Properties continueBatchOnErrorProps = new Properties();
+        continueBatchOnErrorProps.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        continueBatchOnErrorProps.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         continueBatchOnErrorProps.setProperty(PropertyKey.continueBatchOnError.getKeyName(), String.valueOf(continueBatchOnError));
         this.conn = getConnectionWithProps(continueBatchOnErrorProps);
         Statement statement = this.conn.createStatement();
@@ -463,9 +469,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#10155, double quotes not recognized when parsing client-side prepared statements.
-     * 
+     *
      * @throws Exception
-     *             if the test fails.
      */
     @Test
     public void testBug10155() throws Exception {
@@ -474,7 +479,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#10630, Statement.getWarnings() fails with NPE if statement has been closed.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -483,7 +488,10 @@ public class StatementRegressionTest extends BaseTestCase {
         Statement stmt2 = null;
 
         try {
-            conn2 = getConnectionWithProps((Properties) null);
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            conn2 = getConnectionWithProps(props);
             stmt2 = conn2.createStatement();
 
             conn2.close();
@@ -504,7 +512,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#11115, Varbinary data corrupted when using server-side prepared statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -554,6 +562,8 @@ public class StatementRegressionTest extends BaseTestCase {
             this.stmt.executeUpdate("INSERT INTO testBug11540 VALUES (NOW(), NOW())");
             Locale.setDefault(new Locale("th", "TH"));
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.jdbcCompliantTruncation.getKeyName(), "false");
             props.setProperty(PropertyKey.connectionTimeZone.getKeyName(), "LOCAL");
 
@@ -582,6 +592,8 @@ public class StatementRegressionTest extends BaseTestCase {
             this.rs.close();
 
             props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.connectionTimeZone.getKeyName(), "LOCAL");
             Connection testConn = getConnectionWithProps(props);
             TimeZone serverTz = ((MysqlConnection) testConn).getSession().getServerSession().getSessionTimeZone();
@@ -597,7 +609,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#11663, autoGenerateTestcaseScript uses bogus parameter names for server-side prepared statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -646,9 +658,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#11798 - Pstmt.setObject(...., Types.BOOLEAN) throws exception.
-     * 
+     *
      * @throws Exception
-     *             if the test fails.
      */
     @Test
     public void testBug11798() throws Exception {
@@ -668,7 +679,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#13255 - Reconnect during middle of executeBatch()
      * should not happen.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -676,6 +687,8 @@ public class StatementRegressionTest extends BaseTestCase {
         createTable("testBug13255", "(field_1 int)");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.autoReconnect.getKeyName(), "true");
 
         Connection reconnectConn = null;
@@ -746,7 +759,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#15024 - Driver incorrectly closes streams passed as
      * arguments to PreparedStatements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -758,6 +771,8 @@ public class StatementRegressionTest extends BaseTestCase {
             testStreamsForBug15024(false, false);
 
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useConfigs.getKeyName(), "3-0-Compat");
 
             Connection compatConn = null;
@@ -784,7 +799,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * PreparedStatement should call EscapeProcessor.escapeSQL?
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -828,7 +843,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#18041 - Server-side prepared statements don't cause
      * truncation exceptions to be thrown.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -836,6 +851,8 @@ public class StatementRegressionTest extends BaseTestCase {
         createTable("testBug18041", "(`a` tinyint(4) NOT NULL, `b` char(4) default NULL)");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.jdbcCompliantTruncation.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
 
@@ -892,6 +909,7 @@ public class StatementRegressionTest extends BaseTestCase {
         public boolean isClosed() {
             return this.isClosed;
         }
+
     }
 
     class IsClosedInputStream extends ByteArrayInputStream {
@@ -908,7 +926,6 @@ public class StatementRegressionTest extends BaseTestCase {
 
         @Override
         public void close() throws IOException {
-
             super.close();
             this.isClosed = true;
         }
@@ -916,11 +933,12 @@ public class StatementRegressionTest extends BaseTestCase {
         public boolean isClosed() {
             return this.isClosed;
         }
+
     }
 
     /**
      * Tests fix for BUG#1774 -- Truncated words after double quote
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -947,7 +965,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#1901 -- PreparedStatement.setObject(int, Object, int,
      * int) doesn't support CLOB or BLOB types.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -975,7 +993,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Test fix for BUG#1933 -- Driver property 'maxRows' has no effect.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -986,7 +1004,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
-
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.maxRows.getKeyName(), "1");
 
             maxRowsConn = getConnectionWithProps(props);
@@ -1033,7 +1052,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests the fix for BUG#1934 -- prepareStatement dies silently when
      * encountering Statement.RETURN_GENERATED_KEY
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1057,7 +1076,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#1958 - Improper bounds checking on
      * PreparedStatement.setFoo().
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1087,7 +1106,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests the fix for BUG#2606, server-side prepared statements not returning
      * datatype YEAR correctly.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1111,7 +1130,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests the fix for BUG#2671, nulls encoded incorrectly in server-side prepared statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1143,9 +1162,9 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#3103 -- java.util.Date not accepted as parameter to
      * PreparedStatement.setObject().
-     * 
+     *
      * @throws Exception
-     * 
+     *
      * @deprecated uses deprecated methods of Date class
      */
     @Deprecated
@@ -1173,9 +1192,9 @@ public class StatementRegressionTest extends BaseTestCase {
             java.util.Date retrUtilDate = new java.util.Date(this.rs.getTimestamp(1).getTime());
 
             // We can only compare on the day/month/year hour/minute/second interval, because the timestamp has added milliseconds to the internal date...
-            assertTrue((utilDate.getMonth() == retrUtilDate.getMonth()) && (utilDate.getDate() == retrUtilDate.getDate())
-                    && (utilDate.getYear() == retrUtilDate.getYear()) && (utilDate.getHours() == retrUtilDate.getHours())
-                    && (utilDate.getMinutes() == retrUtilDate.getMinutes()) && (utilDate.getSeconds() == retrUtilDate.getSeconds()), "Dates not equal");
+            assertTrue(utilDate.getMonth() == retrUtilDate.getMonth() && utilDate.getDate() == retrUtilDate.getDate()
+                    && utilDate.getYear() == retrUtilDate.getYear() && utilDate.getHours() == retrUtilDate.getHours()
+                    && utilDate.getMinutes() == retrUtilDate.getMinutes() && utilDate.getSeconds() == retrUtilDate.getSeconds(), "Dates not equal");
         } finally {
             this.stmt.executeUpdate("DROP TABLE IF EXISTS testBug3103");
         }
@@ -1183,7 +1202,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#3520
-     * 
+     *
      * @throws Exception
      *             ...
      */
@@ -1203,7 +1222,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Test fix for BUG#3557 -- UpdatableResultSet not picking up default values
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1236,113 +1255,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#3620 -- Timezone not respected correctly.
-     * 
-     * @throws SQLException
-     */
-    @Test
-    public void testBug3620() throws SQLException {
-        // FIXME: This test is sensitive to being in CST/CDT it seems
-        assumeTrue(TimeZone.getDefault().equals(TimeZone.getTimeZone("America/Chicago")));
-
-        long epsillon = 3000; // 3 seconds time difference
-
-        try {
-            this.stmt.executeUpdate("DROP TABLE IF EXISTS testBug3620");
-            this.stmt.executeUpdate("CREATE TABLE testBug3620 (field1 TIMESTAMP)");
-
-            PreparedStatement tsPstmt = this.conn.prepareStatement("INSERT INTO testBug3620 VALUES (?)");
-
-            Calendar pointInTime = Calendar.getInstance();
-            pointInTime.set(2004, 02, 29, 10, 0, 0);
-
-            long pointInTimeOffset = pointInTime.getTimeZone().getRawOffset();
-
-            java.sql.Timestamp ts = new java.sql.Timestamp(pointInTime.getTime().getTime());
-
-            tsPstmt.setTimestamp(1, ts);
-            tsPstmt.executeUpdate();
-
-            String tsValueAsString = getSingleValue("testBug3620", "field1", null).toString();
-
-            System.out.println("Timestamp as string with no calendar: " + tsValueAsString.toString());
-
-            Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-
-            this.stmt.executeUpdate("DELETE FROM testBug3620");
-
-            Statement tsStmt = this.conn.createStatement();
-
-            tsPstmt = this.conn.prepareStatement("INSERT INTO testBug3620 VALUES (?)");
-
-            tsPstmt.setTimestamp(1, ts, cal);
-            tsPstmt.executeUpdate();
-
-            tsValueAsString = getSingleValue("testBug3620", "field1", null).toString();
-
-            Timestamp tsValueAsTimestamp = (Timestamp) getSingleValue("testBug3620", "field1", null);
-
-            System.out.println("Timestamp as string with UTC calendar: " + tsValueAsString.toString());
-            System.out.println("Timestamp as Timestamp with UTC calendar: " + tsValueAsTimestamp);
-
-            this.rs = tsStmt.executeQuery("SELECT field1 FROM testBug3620");
-            this.rs.next();
-
-            Timestamp tsValueUTC = this.rs.getTimestamp(1, cal);
-
-            //
-            // We use this testcase with other vendors, JDBC spec requires result set fields can only be read once, although MySQL doesn't require this ;)
-            //
-            this.rs = tsStmt.executeQuery("SELECT field1 FROM testBug3620");
-            this.rs.next();
-
-            Timestamp tsValueStmtNoCal = this.rs.getTimestamp(1);
-
-            System.out.println("Timestamp specifying UTC calendar from normal statement: " + tsValueUTC.toString());
-
-            PreparedStatement tsPstmtRetr = this.conn.prepareStatement("SELECT field1 FROM testBug3620");
-
-            this.rs = tsPstmtRetr.executeQuery();
-            this.rs.next();
-
-            Timestamp tsValuePstmtUTC = this.rs.getTimestamp(1, cal);
-
-            System.out.println("Timestamp specifying UTC calendar from prepared statement: " + tsValuePstmtUTC.toString());
-
-            //
-            // We use this testcase with other vendors, JDBC spec requires result set fields can only be read once, although MySQL doesn't require this ;)
-            //
-            this.rs = tsPstmtRetr.executeQuery();
-            this.rs.next();
-
-            Timestamp tsValuePstmtNoCal = this.rs.getTimestamp(1);
-
-            System.out.println("Timestamp specifying no calendar from prepared statement: " + tsValuePstmtNoCal.toString());
-
-            long stmtDeltaTWithCal = (ts.getTime() - tsValueStmtNoCal.getTime());
-
-            long deltaOrig = Math.abs(stmtDeltaTWithCal - pointInTimeOffset);
-
-            assertTrue((deltaOrig < epsillon), "Difference between original timestamp and timestamp retrieved using java.sql.Statement "
-                    + "set in database using UTC calendar is not ~= " + epsillon + ", it is actually " + deltaOrig);
-
-            long pStmtDeltaTWithCal = (ts.getTime() - tsValuePstmtNoCal.getTime());
-
-            System.out.println(
-                    Math.abs(pStmtDeltaTWithCal - pointInTimeOffset) + " < " + epsillon + (Math.abs(pStmtDeltaTWithCal - pointInTimeOffset) < epsillon));
-            assertTrue((Math.abs(pStmtDeltaTWithCal - pointInTimeOffset) < epsillon),
-                    "Difference between original timestamp and timestamp retrieved using java.sql.PreparedStatement "
-                            + "set in database using UTC calendar is not ~= " + epsillon + ", it is actually " + pStmtDeltaTWithCal);
-
-            System.out.println("Difference between original ts and ts with no calendar: " + (ts.getTime() - tsValuePstmtNoCal.getTime()) + ", offset should be "
-                    + pointInTimeOffset);
-        } finally {
-            this.stmt.executeUpdate("DROP TABLE IF EXISTS testBug3620");
-        }
-    }
-
-    /**
-     * Tests fix for BUG#3620 -- Timezone not respected correctly.
-     * 
+     *
      * @throws SQLException
      *
      */
@@ -1422,14 +1335,14 @@ public class StatementRegressionTest extends BaseTestCase {
             Timestamp tsValuePstmtNoCal = this.rs.getTimestamp(1);
             System.out.println("Timestamp specifying no calendar from prepared statement: " + tsValuePstmtNoCal.toString());
 
-            long stmtDeltaTWithCal = (tsValueStmtNoCal.getTime() - ts.getTime());
+            long stmtDeltaTWithCal = tsValueStmtNoCal.getTime() - ts.getTime();
             long deltaOrig = Math.abs(stmtDeltaTWithCal - pointInTimeOffset);
-            assertTrue((deltaOrig < epsillon), "Difference between original timestamp and timestamp retrieved using java.sql.Statement "
+            assertTrue(deltaOrig < epsillon, "Difference between original timestamp and timestamp retrieved using java.sql.Statement "
                     + "set in database using UTC calendar is not ~= " + epsillon + " it is actually " + deltaOrig);
 
-            long pStmtDeltaTWithCal = (tsValuePstmtNoCal.getTime() - ts.getTime());
+            long pStmtDeltaTWithCal = tsValuePstmtNoCal.getTime() - ts.getTime();
             deltaOrig = Math.abs(pStmtDeltaTWithCal - pointInTimeOffset);
-            assertTrue((deltaOrig < epsillon), "Difference between original timestamp and timestamp retrieved using java.sql.PreparedStatement "
+            assertTrue(deltaOrig < epsillon, "Difference between original timestamp and timestamp retrieved using java.sql.PreparedStatement "
                     + "set in database using UTC calendar is not ~= " + epsillon + ", it is actually " + deltaOrig);
 
             System.out.println("Difference between original ts and ts with no calendar: " + (tsValuePstmtNoCal.getTime() - ts.getTime()) + ", offset should be "
@@ -1441,7 +1354,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests that DataTruncation is thrown when data is truncated.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1475,7 +1388,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#3804, data truncation on server should throw
      * DataTruncation exception.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1502,7 +1415,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests BUG#3873 - PreparedStatement.executeBatch() not returning all
      * generated keys (even though that's not JDBC compliant).
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1549,7 +1462,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#4119 -- misbehavior in a managed environment from
      * MVCSoft JDO
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1581,7 +1494,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#4311 - Error in JDBC retrieval of mediumint column when
      * using prepared statements and binary result sets.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1607,7 +1520,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#4510 -- Statement.getGeneratedKeys() fails when key >
      * 32767
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1635,7 +1548,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Server doesn't accept everything as a server-side prepared statement, so
      * by default we scan for stuff it can't handle.
-     * 
+     *
      * @throws SQLException
      */
     @Test
@@ -1681,7 +1594,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#5012 -- ServerPreparedStatements dealing with return of
      * DECIMAL type don't work.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1710,7 +1623,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#5133 -- PreparedStatement.toString() doesn't return
      * correct value if no parameters are present in statement.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1725,7 +1638,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests for BUG#5191 -- PreparedStatement.executeQuery() gives
      * OutOfMemoryError
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1745,7 +1658,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
             for (int i = 0; i < questions.length; i++) {
                 this.stmt.executeUpdate("INSERT INTO testBug5191Q(Text) VALUES (\"" + questions[i] + "\")");
-                int catagory = (i < 3) ? 0 : i;
+                int catagory = i < 3 ? 0 : i;
 
                 this.stmt.executeUpdate("INSERT INTO testBug5191C (CategoryId, QuestionId) VALUES (" + catagory + ", " + i + ")");
                 /*
@@ -1777,12 +1690,14 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests for BUG#5235, ClassCastException on all-zero date field when
      * zeroDatetimeBehavior is 'CONVERT_TO_NULL'.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug5235() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.zeroDateTimeBehavior.getKeyName(), "CONVERT_TO_NULL");
         if (versionMeetsMinimum(5, 7, 4)) {
             props.setProperty(PropertyKey.jdbcCompliantTruncation.getKeyName(), "false");
@@ -1821,6 +1736,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.characterEncoding.getKeyName(), "utf-8");
 
             Connection utf8Conn = getConnectionWithProps(props);
@@ -1889,75 +1806,6 @@ public class StatementRegressionTest extends BaseTestCase {
         pStmt.executeUpdate();
     }
 
-    /**
-     * Tests fix for BUG#5874, timezone correction goes in wrong 'direction' (when useTimezone=true and server timezone differs from client timezone).
-     * 
-     * @throws Exception
-     */
-    @Test
-    public void testBug5874() throws Exception {
-        TimeZone defaultTimeZone = TimeZone.getDefault();
-
-        try {
-            String clientTimeZoneName = "America/Los_Angeles";
-            String connectionTimeZoneName = "America/Chicago";
-
-            TimeZone.setDefault(TimeZone.getTimeZone(clientTimeZoneName));
-
-            long offsetDifference = TimeZone.getDefault().getRawOffset() - TimeZone.getTimeZone(connectionTimeZoneName).getRawOffset();
-
-            SimpleDateFormat timestampFormat = TimeUtil.getSimpleDateFormat(null, "yyyy-MM-dd HH:mm:ss", null);
-            SimpleDateFormat timeFormat = TimeUtil.getSimpleDateFormat(null, "HH:mm:ss", null);
-
-            long pointInTime = timestampFormat.parse("2004-10-04 09:19:00").getTime();
-
-            Properties props = new Properties();
-            props.put("useTimezone", "true");
-            props.put(PropertyKey.connectionTimeZone.getKeyName(), connectionTimeZoneName);
-            props.put(PropertyKey.forceConnectionTimeZoneToSession.getKeyName(), "true");
-            props.put(PropertyKey.cacheDefaultTimeZone.getKeyName(), "false");
-            props.setProperty(PropertyKey.preserveInstants.getKeyName(), "true");
-
-            Connection tzConn = getConnectionWithProps(props);
-            Statement tzStmt = tzConn.createStatement();
-            createTable("testBug5874", "(tstamp DATETIME, t TIME)");
-
-            PreparedStatement tsPstmt = tzConn.prepareStatement("INSERT INTO testBug5874 VALUES (?, ?)");
-
-            tsPstmt.setTimestamp(1, new Timestamp(pointInTime));
-            tsPstmt.setTime(2, new Time(pointInTime));
-            tsPstmt.executeUpdate();
-
-            this.rs = tzStmt.executeQuery("SELECT * from testBug5874");
-
-            while (this.rs.next()) { // Driver now converts/checks DATE/TIME/TIMESTAMP/DATETIME types when calling getString()...
-                String retrTimestampString = new String(this.rs.getBytes(1));
-                Timestamp retrTimestamp = this.rs.getTimestamp(1);
-
-                java.util.Date timestampOnServer = timestampFormat.parse(retrTimestampString);
-
-                long retrievedOffsetForTimestamp = retrTimestamp.getTime() - timestampOnServer.getTime();
-
-                assertEquals(offsetDifference, retrievedOffsetForTimestamp,
-                        "Original timestamp and timestamp retrieved using client timezone are not the same");
-
-                String retrTimeString = new String(this.rs.getBytes(2));
-                Time retrTime = this.rs.getTime(2);
-
-                java.util.Date timeOnServerAsDate = timeFormat.parse(retrTimeString);
-                Time timeOnServer = new Time(timeOnServerAsDate.getTime());
-
-                long retrievedOffsetForTime = retrTime.getTime() - timeOnServer.getTime();
-
-                assertEquals(0, retrievedOffsetForTime, "Original time and time retrieved using client timezone are not the same");
-            }
-
-            tzConn.close();
-        } finally {
-            TimeZone.setDefault(defaultTimeZone);
-        }
-    }
-
     @Test
     public void testBug6823() throws SQLException {
         innerBug6823(true);
@@ -1990,7 +1838,6 @@ public class StatementRegressionTest extends BaseTestCase {
 
     @Test
     public void testBug8181() throws Exception {
-
         try {
             this.stmt.executeUpdate("DROP TABLE IF EXISTS testBug8181");
             this.stmt.executeUpdate("CREATE TABLE testBug8181(col1 VARCHAR(20),col2 INT)");
@@ -2017,7 +1864,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#8487 - PreparedStatements not creating streaming result
      * sets.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2050,7 +1897,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests multiple statement support with fix for BUG#9704.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2060,6 +1907,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.allowMultiQueries.getKeyName(), "true");
 
             multiStmtConn = getConnectionWithProps(props);
@@ -2111,7 +1960,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests that you can close a statement twice without an NPE.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2121,86 +1970,9 @@ public class StatementRegressionTest extends BaseTestCase {
         closeMe.close();
     }
 
-    @Test
-    public void testCsc4194() throws Exception {
-        try {
-            "".getBytes("Windows-31J");
-        } catch (UnsupportedEncodingException ex) {
-            return; // test doesn't work on this platform
-        }
-
-        Connection sjisConn = null;
-        Connection windows31JConn = null;
-
-        try {
-            String tableNameText = "testCsc4194Text";
-            String tableNameBlob = "testCsc4194Blob";
-
-            createTable(tableNameBlob, "(field1 BLOB)");
-            String charset = "";
-
-            charset = " CHARACTER SET cp932";
-
-            createTable(tableNameText, "(field1 TEXT)" + charset);
-
-            Properties windows31JProps = new Properties();
-            windows31JProps.setProperty(PropertyKey.characterEncoding.getKeyName(), "Windows-31J");
-
-            windows31JConn = getConnectionWithProps(windows31JProps);
-            testCsc4194InsertCheckBlob(windows31JConn, tableNameBlob);
-
-            testCsc4194InsertCheckText(windows31JConn, tableNameText, "Windows-31J");
-
-            Properties sjisProps = new Properties();
-            sjisProps.setProperty(PropertyKey.characterEncoding.getKeyName(), "sjis");
-
-            sjisConn = getConnectionWithProps(sjisProps);
-            testCsc4194InsertCheckBlob(sjisConn, tableNameBlob);
-            testCsc4194InsertCheckText(sjisConn, tableNameText, "Windows-31J");
-
-        } finally {
-
-            if (windows31JConn != null) {
-                windows31JConn.close();
-            }
-
-            if (sjisConn != null) {
-                sjisConn.close();
-            }
-        }
-    }
-
-    private void testCsc4194InsertCheckBlob(Connection c, String tableName) throws Exception {
-        byte[] bArray = new byte[] { (byte) 0xac, (byte) 0xed, (byte) 0x00, (byte) 0x05 };
-
-        PreparedStatement testStmt = c.prepareStatement("INSERT INTO " + tableName + " VALUES (?)");
-        testStmt.setBytes(1, bArray);
-        testStmt.executeUpdate();
-
-        this.rs = c.createStatement().executeQuery("SELECT field1 FROM " + tableName);
-        assertTrue(this.rs.next());
-        assertEquals(getByteArrayString(bArray), getByteArrayString(this.rs.getBytes(1)));
-        this.rs.close();
-    }
-
-    private void testCsc4194InsertCheckText(Connection c, String tableName, String encoding) throws Exception {
-        byte[] kabuInShiftJIS = { (byte) 0x87, // a double-byte charater("kabu") in Shift JIS
-                (byte) 0x8a, };
-
-        String expected = new String(kabuInShiftJIS, encoding);
-        PreparedStatement testStmt = c.prepareStatement("INSERT INTO " + tableName + " VALUES (?)");
-        testStmt.setString(1, expected);
-        testStmt.executeUpdate();
-
-        this.rs = c.createStatement().executeQuery("SELECT field1 FROM " + tableName);
-        assertTrue(this.rs.next());
-        assertEquals(expected, this.rs.getString(1));
-        this.rs.close();
-    }
-
     /**
      * Tests all forms of statements influencing getGeneratedKeys().
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2269,7 +2041,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests that max_rows and 'limit' don't cause exceptions to be thrown.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2294,39 +2066,39 @@ public class StatementRegressionTest extends BaseTestCase {
     /*
      * public void testBug9595() throws Exception { double[] vals = new double[]
      * {52.21, 52.22, 52.23, 52.24};
-     * 
+     *
      * createTable("testBug9595", "(field1 DECIMAL(10,2), sortField INT)");
-     * 
+     *
      * this.pstmt = this.conn.prepareStatement("INSERT INTO testBug9595 VALUES
      * (?, ?)"); // Try setting as doubles for (int i = 0; i < vals.length; i++)
      * { this.pstmt.setDouble(1, vals[i]); this.pstmt.setInt(2, i);
      * this.pstmt.executeUpdate(); }
-     * 
+     *
      * this.pstmt = this.conn.prepareStatement("SELECT field1 FROM testBug9595
      * ORDER BY sortField"); this.rs = this.pstmt.executeQuery();
-     * 
+     *
      * int i = 0;
-     * 
+     *
      * while (this.rs.next()) { double valToTest = vals[i++];
-     * 
+     *
      * assertEquals(this.rs.getDouble(1), valToTest, 0.001);
      * assertEquals(this.rs.getBigDecimal(1).doubleValue(), valToTest, 0.001); }
-     * 
+     *
      * this.pstmt = this.conn.prepareStatement("INSERT INTO testBug9595 VALUES
      * (?, ?)");
-     * 
+     *
      * this.stmt.executeUpdate("TRUNCATE TABLE testBug9595"); // Now, as
      * BigDecimals for (i = 0; i < vals.length; i++) { BigDecimal foo = new
      * BigDecimal(vals[i]);
-     * 
+     *
      * this.pstmt.setObject(1, foo, Types.DECIMAL, 2); this.pstmt.setInt(2, i);
      * this.pstmt.executeUpdate(); }
-     * 
+     *
      * this.pstmt = this.conn.prepareStatement("SELECT field1 FROM testBug9595
      * ORDER BY sortField"); this.rs = this.pstmt.executeQuery();
-     * 
+     *
      * i = 0;
-     * 
+     *
      * while (this.rs.next()) { double valToTest = vals[i++];
      * System.out.println(this.rs.getString(1));
      * assertEquals(this.rs.getDouble(1), valToTest, 0.001);
@@ -2336,76 +2108,75 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests that 'LOAD DATA LOCAL INFILE' works
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testLoadData() throws Exception {
-        try {
-            //int maxAllowedPacket = 1048576;
+        assumeTrue(supportsLoadLocalInfile(this.stmt), "This test requires the server started with --local-infile=ON");
 
-            this.stmt.executeUpdate("DROP TABLE IF EXISTS loadDataRegress");
-            this.stmt.executeUpdate("CREATE TABLE loadDataRegress (field1 int, field2 int)");
+        createTable("loadDataRegress", "(field1 int, field2 int)");
 
-            File tempFile = File.createTempFile("mysql", ".txt");
+        //int maxAllowedPacket = 1048576;
 
-            // tempFile.deleteOnExit();
-            System.out.println(tempFile);
+        File tempFile = File.createTempFile("mysql", ".txt");
 
-            Writer out = new FileWriter(tempFile);
+        // tempFile.deleteOnExit();
+        System.out.println(tempFile);
 
-            int localCount = 0;
-            int rowCount = 128; // maxAllowedPacket * 4;
+        Writer out = new FileWriter(tempFile);
 
-            for (int i = 0; i < rowCount; i++) {
-                out.write((localCount++) + "\t" + (localCount++) + "\n");
-            }
+        int localCount = 0;
+        int rowCount = 128; // maxAllowedPacket * 4;
 
-            out.close();
+        for (int i = 0; i < rowCount; i++) {
+            out.write(localCount++ + "\t" + localCount++ + "\n");
+        }
 
-            StringBuilder fileNameBuf = null;
+        out.close();
 
-            if (File.separatorChar == '\\') {
-                fileNameBuf = new StringBuilder();
+        StringBuilder fileNameBuf = null;
 
-                String fileName = tempFile.getAbsolutePath();
-                int fileNameLength = fileName.length();
+        if (File.separatorChar == '\\') {
+            fileNameBuf = new StringBuilder();
 
-                for (int i = 0; i < fileNameLength; i++) {
-                    char c = fileName.charAt(i);
+            String fileName = tempFile.getAbsolutePath();
+            int fileNameLength = fileName.length();
 
-                    if (c == '\\') {
-                        fileNameBuf.append("/");
-                    } else {
-                        fileNameBuf.append(c);
-                    }
+            for (int i = 0; i < fileNameLength; i++) {
+                char c = fileName.charAt(i);
+
+                if (c == '\\') {
+                    fileNameBuf.append("/");
+                } else {
+                    fileNameBuf.append(c);
                 }
-            } else {
-                fileNameBuf = new StringBuilder(tempFile.getAbsolutePath());
             }
-            final String fileName = fileNameBuf.toString();
+        } else {
+            fileNameBuf = new StringBuilder(tempFile.getAbsolutePath());
+        }
+        final String fileName = fileNameBuf.toString();
 
-            assertThrows(SQLSyntaxErrorException.class,
-                    versionMeetsMinimum(8, 0, 19) ? "Loading local data is disabled;.*" : "The used command is not allowed with this MySQL version", () -> {
-                        this.stmt.executeUpdate("LOAD DATA LOCAL INFILE '" + fileName + "' INTO TABLE loadDataRegress CHARACTER SET "
-                                + CharsetMappingWrapper.getStaticMysqlCharsetForJavaEncoding(
-                                        ((MysqlConnection) this.conn).getPropertySet().getStringProperty(PropertyKey.characterEncoding).getValue(),
-                                        this.serverVersion));
-                        return null;
-                    });
-
-            Properties props = new Properties();
-            props.setProperty(PropertyKey.allowLoadLocalInfile.getKeyName(), "true");
-            Connection testConn = getConnectionWithProps(props);
-            int updateCount = testConn.createStatement()
-                    .executeUpdate("LOAD DATA LOCAL INFILE '" + fileNameBuf.toString() + "' INTO TABLE loadDataRegress CHARACTER SET "
+        assertThrows(SQLSyntaxErrorException.class,
+                versionMeetsMinimum(8, 0, 19) ? "Loading local data is disabled;.*" : "The used command is not allowed with this MySQL version", () -> {
+                    this.stmt.executeUpdate("LOAD DATA LOCAL INFILE '" + fileName + "' INTO TABLE loadDataRegress CHARACTER SET "
                             + CharsetMappingWrapper.getStaticMysqlCharsetForJavaEncoding(
                                     ((MysqlConnection) this.conn).getPropertySet().getStringProperty(PropertyKey.characterEncoding).getValue(),
                                     this.serverVersion));
-            assertTrue(updateCount == rowCount);
-        } finally {
-            this.stmt.executeUpdate("DROP TABLE IF EXISTS loadDataRegress");
-        }
+                    return null;
+                });
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.allowLoadLocalInfile.getKeyName(), "true");
+        Connection testConn = getConnectionWithProps(props);
+        int updateCount = testConn.createStatement()
+                .executeUpdate("LOAD DATA LOCAL INFILE '" + fileNameBuf.toString() + "' INTO TABLE loadDataRegress CHARACTER SET "
+                        + CharsetMappingWrapper.getStaticMysqlCharsetForJavaEncoding(
+                                ((MysqlConnection) this.conn).getPropertySet().getStringProperty(PropertyKey.characterEncoding).getValue(),
+                                this.serverVersion));
+        assertTrue(updateCount == rowCount);
     }
 
     @Test
@@ -2427,7 +2198,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#1658
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2471,77 +2242,76 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests for BUG#9288, parameter index out of range if LIKE, ESCAPE '\'
      * present in query.
-     * 
+     *
      * @throws Exception
      */
     /*
      * public void testBug9288() throws Exception { String tableName =
      * "testBug9288"; PreparedStatement pStmt = null;
-     * 
+     *
      * try { createTable(tableName, "(field1 VARCHAR(32), field2 INT)"); pStmt =
      * ((com.mysql.jdbc.Connection)this.conn).clientPrepareStatement( "SELECT
      * COUNT(1) FROM " + tableName + " WHERE " + "field1 LIKE '%' ESCAPE '\\'
      * AND " + "field2 > ?"); pStmt.setInt(1, 0);
-     * 
+     *
      * this.rs = pStmt.executeQuery(); } finally { if (this.rs != null) {
      * this.rs.close(); this.rs = null; }
-     * 
+     *
      * if (pStmt != null) { pStmt.close(); } } }
      */
 
     /*
      * public void testBug10999() throws Exception { if (versionMeetsMinimum(5,
      * 0, 5)) {
-     * 
+     *
      * String tableName = "testBug10999"; String updateTrigName =
      * "testBug10999Update"; String insertTrigName = "testBug10999Insert"; try {
      * createTable(tableName, "(pkfield INT PRIMARY KEY NOT NULL AUTO_INCREMENT,
      * field1 VARCHAR(32))");
-     * 
+     *
      * try { this.stmt.executeUpdate("DROP TRIGGER " + updateTrigName); } catch
      * (SQLException sqlEx) { // ignore for now }
-     * 
+     *
      * this.stmt.executeUpdate("CREATE TRIGGER " + updateTrigName + " AFTER
      * UPDATE ON " + tableName + " FOR EACH ROW " + "BEGIN " + "END");
-     * 
+     *
      * try { this.stmt.executeUpdate("DROP TRIGGER " + insertTrigName); } catch
      * (SQLException sqlEx) { // ignore }
-     * 
+     *
      * this.stmt.executeUpdate("CREATE TRIGGER " + insertTrigName + " AFTER
      * INSERT ON " + tableName + " FOR EACH ROW " + " BEGIN " + "END");
-     * 
+     *
      * this.conn.setAutoCommit(false);
-     * 
+     *
      * String updateSQL = "INSERT INTO " + tableName + " (field1) VALUES
      * ('abcdefg')"; int rowCount = this.stmt.executeUpdate(updateSQL,
      * Statement.RETURN_GENERATED_KEYS);
-     * 
+     *
      * this.rs = stmt.getGeneratedKeys(); if (rs.next()) {
      * System.out.println(rs.getInt(1)); int id = rs.getInt(1); //if
      * (log.isDebugEnabled()) // log.debug("Retrieved ID = " + id); } //else {
      * //log.error("Can't retrieve ID with getGeneratedKeys."); // Retrieve ID
      * using a SELECT statement instead. // querySQL = "SELECT id from tab1
      * WHERE ...";
-     * 
+     *
      * //if (log.isDebugEnabled()) // log.debug(querySQL);
-     * 
+     *
      * //rs = stmt.executeQuery(querySQL); this.rs =
      * this.stmt.executeQuery("SELECT pkfield FROM " + tableName); } finally {
      * this.conn.setAutoCommit(true);
-     * 
+     *
      * try { this.stmt.executeUpdate("DROP TRIGGER IF EXISTS " +
      * insertTrigName); } catch (SQLException sqlEx) { // ignore }
-     * 
+     *
      * try { this.stmt.executeUpdate("DROP TRIGGER IF EXISTS " +
      * updateTrigName); } catch (SQLException sqlEx) { // ignore } } } }
      */
 
     /**
      * Tests that binary dates/times are encoded/decoded correctly.
-     * 
+     *
      * @throws Exception
-     *             if the test fails.
-     * 
+     *
      * @deprecated because we need to use this particular constructor for the
      *             date class, as Calendar-constructed dates don't pass the
      *             .equals() test :(
@@ -2577,8 +2347,10 @@ public class StatementRegressionTest extends BaseTestCase {
 
     @Test
     public void testServerPrepStmtDeadlock() throws Exception {
-
-        Connection c = getConnectionWithProps((Properties) null);
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        Connection c = getConnectionWithProps(props);
 
         Thread testThread1 = new PrepareThread(c);
         Thread testThread2 = new PrepareThread(c);
@@ -2591,7 +2363,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests PreparedStatement.setCharacterStream() to ensure it accepts > 4K
      * streams
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2659,7 +2431,7 @@ public class StatementRegressionTest extends BaseTestCase {
             this.pstmt = this.conn.prepareStatement("INSERT INTO `charStream'RegressTest` VALUES (?)");
 
             reader = new CharArrayReader(charBuf);
-            this.pstmt.setCharacterStream(1, reader, (charBuf.length * 2));
+            this.pstmt.setCharacterStream(1, reader, charBuf.length * 2);
             this.pstmt.executeUpdate();
 
             this.rs = this.stmt.executeQuery("SELECT field1 FROM `charStream'RegressTest`");
@@ -2690,7 +2462,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests a bug where Statement.setFetchSize() does not work for values other
      * than 0 or Integer.MIN_VALUE
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2706,7 +2478,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#907
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2726,9 +2498,9 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests for timestamp NPEs occuring in binary-format timestamps.
-     * 
+     *
      * @throws Exception
-     * 
+     *
      * @deprecated yes, we know we are using deprecated methods here :)
      */
     @Deprecated
@@ -2781,7 +2553,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for updatable streams being supported in updatable result sets.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2806,6 +2578,11 @@ public class StatementRegressionTest extends BaseTestCase {
             updRs.updateBinaryStream("field1", new ByteArrayInputStream(streamData), streamLength);
 
             updRs.insertRow();
+
+            assertTrue(updRs.next());
+            assertEquals(1, updRs.getInt(1));
+            assertTrue(Arrays.equals(streamData, updRs.getBytes(2)));
+
         } finally {
             this.stmt.executeUpdate("DROP TABLE IF EXISTS updateStreamTest");
         }
@@ -2814,7 +2591,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#15383 - PreparedStatement.setObject() serializes BigInteger as object, rather than sending as numeric value (and is thus not
      * complementary to .getObject() on an UNSIGNED LONG type).
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2852,12 +2629,11 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#17099 - Statement.getGeneratedKeys() throws NPE when no query has been processed.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug17099() throws Exception {
-
         PreparedStatement pStmt = this.conn.prepareStatement("SELECT 1", Statement.RETURN_GENERATED_KEYS);
         assertNotNull(pStmt.getGeneratedKeys());
 
@@ -2867,7 +2643,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#17587 - clearParameters() on a closed prepared statement causes NPE.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2901,7 +2677,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#19615, PreparedStatement.setObject(int, Object, int) doesn't respect scale of BigDecimals.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2934,17 +2710,20 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#20029 - NPE thrown from executeBatch().
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug20029() throws Exception {
-        createTable("testBug20029", ("(field1 int)"));
+        createTable("testBug20029", "(field1 int)");
 
         long initialTimeout = 20; // may need to raise this depending on environment we try and do this automatically in this testcase
 
         for (int i = 0; i < 10; i++) {
-            final Connection toBeKilledConn = getConnectionWithProps(new Properties());
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            final Connection toBeKilledConn = getConnectionWithProps(props);
             final long timeout = initialTimeout;
             PreparedStatement toBeKilledPstmt = null;
 
@@ -2957,6 +2736,7 @@ public class StatementRegressionTest extends BaseTestCase {
                 }
 
                 Thread t = new Thread() {
+
                     @Override
                     public void run() {
                         try {
@@ -2966,6 +2746,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
                         }
                     }
+
                 };
 
                 t.start();
@@ -2978,9 +2759,6 @@ public class StatementRegressionTest extends BaseTestCase {
 
                     toBeKilledPstmt.executeBatch();
                     fail("Should've caught a SQLException for the statement being closed here");
-                } catch (BatchUpdateException batchEx) {
-                    assertEquals("08003", batchEx.getSQLState());
-                    break;
                 } catch (SQLException sqlEx) {
                     assertEquals("08003", sqlEx.getSQLState());
                     break;
@@ -3001,7 +2779,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Fixes BUG#20687 - Can't pool server-side prepared statements, exception raised when re-using them.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3010,6 +2788,8 @@ public class StatementRegressionTest extends BaseTestCase {
         Connection poolingConn = null;
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
         PreparedStatement pstmt1 = null;
@@ -3046,6 +2826,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.sessionVariables.getKeyName(), "sql_mode=NO_BACKSLASH_ESCAPES");
 
             noBackslashEscapesConn = getConnectionWithProps(props);
@@ -3081,7 +2863,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#20650 - Statement.cancel() causes NullPointerException if underlying connection has been closed due to server failure.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3090,7 +2872,10 @@ public class StatementRegressionTest extends BaseTestCase {
         Statement cancelStmt = null;
 
         try {
-            closedConn = getConnectionWithProps((String) null);
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            closedConn = getConnectionWithProps(props);
             cancelStmt = closedConn.createStatement();
 
             closedConn.close();
@@ -3109,7 +2894,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#20888 - escape of quotes in client-side prepared statements parsing not respected.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3125,7 +2910,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests Bug#21207 - Driver throws NPE when tracing prepared statements that have been closed (in asSQL()).
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3138,7 +2923,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests BUG#21438, server-side PS fails when using jdbcCompliantTruncation. If either is set to FALSE (&useServerPrepStmts=false or
      * &jdbcCompliantTruncation=false) test succedes.
-     * 
+     *
      * @throws Exception
      */
     @SuppressWarnings("deprecation")
@@ -3163,7 +2948,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#22359 - Driver was using millis for Statement.setQueryTimeout() when spec says argument is seconds.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3182,7 +2967,7 @@ public class StatementRegressionTest extends BaseTestCase {
             } catch (MySQLTimeoutException timeoutEx) {
                 long end = System.currentTimeMillis();
 
-                assertTrue((end - begin) > 1000);
+                assertTrue(end - begin > 1000);
             }
         } finally {
             if (timeoutStmt != null) {
@@ -3194,7 +2979,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#22290 - Driver issues truncation on write exception when it shouldn't (due to sending big decimal incorrectly to server with
      * server-side prepared statement).
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3206,6 +2991,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.sessionVariables.getKeyName(), "sql_mode='STRICT_TRANS_TABLES'");
 
             configuredConn = getConnectionWithProps(props);
@@ -3236,7 +3023,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#24360 .setFetchSize() breaks prepared SHOW and other commands.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3244,6 +3031,8 @@ public class StatementRegressionTest extends BaseTestCase {
         Connection c = null;
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
 
         try {
@@ -3264,9 +3053,9 @@ public class StatementRegressionTest extends BaseTestCase {
      * prepared statements. (this is now fixed if moving from server-side prepared statements to client-side prepared statements by setting
      * "useSSPSCompatibleTimezoneShift" to "true", as the driver can't tell if this is a new deployment that never used server-side prepared statements, or if
      * it is an existing deployment that is switching to client-side prepared statements from server-side prepared statements.
-     * 
+     *
      * Note: The properties 'useJDBCCompliantTimezoneShift' and 'useSSPSCompatibleTimezoneShift' no longer exist in Connector/J 6.0.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3277,6 +3066,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
             props.setProperty(PropertyKey.preserveInstants.getKeyName(), "false");
             conn2 = getConnectionWithProps(props);
@@ -3317,12 +3108,14 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#25073 - rewriting batched statements leaks internal statement instances, and causes a memory leak.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug25073() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
         Connection multiConn = getConnectionWithProps(props);
         createTable("testBug25073", "(pk_field INT PRIMARY KEY NOT NULL AUTO_INCREMENT, field1 INT)");
@@ -3344,6 +3137,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
         createTable("testBug25073", "(pk_field INT PRIMARY KEY NOT NULL AUTO_INCREMENT, field1 INT)");
         props.clear();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
         props.setProperty(PropertyKey.maxAllowedPacket.getKeyName(), "1024");
         props.setProperty(PropertyKey.dumpQueriesOnException.getKeyName(), "true");
@@ -3366,6 +3161,8 @@ public class StatementRegressionTest extends BaseTestCase {
         createTable("testBug25073", "(pk_field INT PRIMARY KEY NOT NULL AUTO_INCREMENT, field1 INT)");
 
         props.clear();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "false");
         props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
         props.setProperty(PropertyKey.dumpQueriesOnException.getKeyName(), "true");
@@ -3411,12 +3208,14 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#25009 - Results from updates not handled correctly in multi-statement queries.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug25009() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.allowMultiQueries.getKeyName(), "true");
 
         Connection multiConn = getConnectionWithProps(props);
@@ -3453,7 +3252,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#25025 - Client-side prepared statement parser gets confused by in-line (slash-star) comments and therefore can't rewrite batched
      * statements or reliably detect type of statements when they're used.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3464,6 +3263,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "false");
 
@@ -3484,7 +3285,7 @@ public class StatementRegressionTest extends BaseTestCase {
             assertEquals(Statement.SUCCESS_NO_INFO, counts[0]);
             assertEquals(Statement.SUCCESS_NO_INFO, counts[1]);
             assertEquals(Statement.SUCCESS_NO_INFO, counts[2]);
-            assertEquals(true, ((ClientPreparedStatement) this.pstmt).getParseInfo().canRewriteAsMultiValueInsertAtSqlLevel());
+            assertEquals(true, ((ClientPreparedStatement) this.pstmt).getQueryInfo().isRewritableWithMultiValuesClause());
         } finally {
             if (multiConn != null) {
                 multiConn.close();
@@ -3522,7 +3323,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#28256 - When connection is in read-only mode, queries that are parentheized incorrectly identified as DML.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3539,10 +3340,10 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#28469 - PreparedStatement.getMetaData() for statements containing leading one-line comments is not returned correctly.
-     * 
+     *
      * As part of this fix, we also overhauled detection of DML for executeQuery() and SELECTs for executeUpdate() in plain and prepared statements to be aware
      * of the same types of comments.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3554,15 +3355,12 @@ public class StatementRegressionTest extends BaseTestCase {
 
             for (int i = 0; i < statementsToTest.length; i++) {
                 commentStmt = this.conn.prepareStatement(statementsToTest[i]);
-
                 assertNotNull(commentStmt.getMetaData());
-
-                try {
-                    commentStmt.executeUpdate();
-                    fail("Should not be able to call executeUpdate() on a SELECT statement!");
-                } catch (SQLException sqlEx) {
-                    // expected
-                }
+                PreparedStatement localCommentStmt = commentStmt;
+                assertThrows("Should not be able to call executeUpdate() on a SELECT statement!", SQLException.class, () -> {
+                    localCommentStmt.executeUpdate();
+                    return null;
+                });
 
                 this.rs = commentStmt.executeQuery();
                 this.rs.next();
@@ -3576,22 +3374,18 @@ public class StatementRegressionTest extends BaseTestCase {
 
             for (int i = 0; i < updatesToTest.length; i++) {
                 commentStmt = this.conn.prepareStatement(updatesToTest[i]);
-
+                PreparedStatement localCommentStmt = commentStmt;
                 assertNull(commentStmt.getMetaData());
 
-                try {
-                    this.rs = commentStmt.executeQuery();
-                    fail("Should not be able to call executeQuery() on a SELECT statement!");
-                } catch (SQLException sqlEx) {
-                    // expected
-                }
-
-                try {
-                    this.rs = this.stmt.executeQuery(updatesToTest[i]);
-                    fail("Should not be able to call executeQuery() on a SELECT statement!");
-                } catch (SQLException sqlEx) {
-                    // expected
-                }
+                assertThrows("Should not be able to call executeQuery() on a SELECT statement!", SQLException.class, () -> {
+                    localCommentStmt.executeQuery();
+                    return null;
+                });
+                int localI = i;
+                assertThrows("Should not be able to call executeQuery() on a SELECT statement!", SQLException.class, () -> {
+                    this.stmt.executeQuery(updatesToTest[localI]);
+                    return null;
+                });
             }
         } finally {
             if (commentStmt != null) {
@@ -3602,7 +3396,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests error with slash-star comment at EOL
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3614,7 +3408,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#28851 - parser in client-side prepared statements eats character following '/' if it's not a multi-line comment.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3630,9 +3424,9 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#28596 - parser in client-side prepared statements runs to end of statement, rather than end-of-line for '#' comments.
-     * 
+     *
      * Also added support for '--' single-line comments
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3657,14 +3451,18 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#30550 - executeBatch() on an empty batch when there are no elements in the batch causes a divide-by-zero error when rewriting is
      * enabled.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug30550() throws Exception {
         createTable("testBug30550", "(field1 int)");
 
-        Connection rewriteConn = getConnectionWithProps("rewriteBatchedStatements=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+        Connection rewriteConn = getConnectionWithProps(props);
         PreparedStatement batchPStmt = null;
         Statement batchStmt = null;
 
@@ -3702,12 +3500,14 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#27412 - cached metadata with PreparedStatement.execute() throws NullPointerException.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug27412() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "false");
         props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), "true");
         props.setProperty(PropertyKey.cacheResultSetMetadata.getKeyName(), "true");
@@ -3812,16 +3612,18 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#32577 - no way to store two timestamp/datetime values that happens over the DST switchover, as the hours end up being the same when
      * sent as the literal that MySQL requires.
-     * 
+     *
      * Note that to get this scenario to work with MySQL (since it doesn't support per-value timezones), you need to configure your server (or session) to be in
      * UTC. This will cause the driver to always convert to/from the server and client timezone consistently.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug32577() throws Exception {
         createTable("testBug32577", "(id INT, field_datetime DATETIME, field_timestamp TIMESTAMP)");
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.sessionVariables.getKeyName(), "time_zone='+0:00'");
         props.setProperty(PropertyKey.connectionTimeZone.getKeyName(), "UTC");
 
@@ -3879,7 +3681,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#30508 - ResultSet returned by Statement.getGeneratedKeys() is not closed automatically when statement that created it is closed.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3956,740 +3758,948 @@ public class StatementRegressionTest extends BaseTestCase {
     public void testBug33823() throws Exception {
         ResultSetInternalMethods resultSetInternalMethods = new ResultSetInternalMethods() {
 
+            @Override
             public void clearNextResultset() {
             }
 
+            @Override
             public char getFirstCharOfQuery() {
                 return 0;
             }
 
+            @Override
             public ResultSetInternalMethods getNextResultset() {
                 return null;
             }
 
+            @Override
             public Object getObjectStoredProc(int columnIndex, int desiredSqlType) throws SQLException {
                 return null;
             }
 
+            @Override
             public Object getObjectStoredProc(int i, Map<Object, Object> map, int desiredSqlType) throws SQLException {
                 return null;
             }
 
+            @Override
             public Object getObjectStoredProc(String columnName, int desiredSqlType) throws SQLException {
                 return null;
             }
 
+            @Override
             public Object getObjectStoredProc(String colName, Map<Object, Object> map, int desiredSqlType) throws SQLException {
                 return null;
             }
 
+            @Override
             public String getServerInfo() {
                 return null;
             }
 
+            @Override
             public long getUpdateCount() {
                 return 0;
             }
 
+            @Override
             public long getUpdateID() {
                 return 0;
             }
 
+            @Override
             public void initializeWithMetadata() throws SQLException {
             }
 
+            @Override
             public void populateCachedMetaData(CachedResultSetMetaData cachedMetaData) throws SQLException {
             }
 
+            @Override
             public void realClose(boolean calledExplicitly) throws SQLException {
             }
 
+            @Override
             public boolean isClosed() {
                 return false;
             }
 
+            @Override
             public boolean hasRows() {
                 return false;
             }
 
+            @Override
             public void setFirstCharOfQuery(char firstCharUpperCase) {
             }
 
+            @Override
             public void setOwningStatement(JdbcStatement owningStatement) {
             }
 
+            @Override
             public void setStatementUsedForFetchingRows(JdbcPreparedStatement stmt) {
             }
 
+            @Override
             public void setWrapperStatement(Statement wrapperStatement) {
             }
 
+            @Override
             public boolean absolute(int row) throws SQLException {
                 return false;
             }
 
+            @Override
             public void afterLast() throws SQLException {
             }
 
+            @Override
             public void beforeFirst() throws SQLException {
             }
 
+            @Override
             public void cancelRowUpdates() throws SQLException {
             }
 
+            @Override
             public void clearWarnings() throws SQLException {
             }
 
+            @Override
             public void close() throws SQLException {
             }
 
+            @Override
             public void deleteRow() throws SQLException {
             }
 
+            @Override
             public int findColumn(String columnName) throws SQLException {
                 return 0;
             }
 
+            @Override
             public boolean first() throws SQLException {
                 return false;
             }
 
+            @Override
             public Array getArray(int i) throws SQLException {
                 return null;
             }
 
+            @Override
             public Array getArray(String colName) throws SQLException {
                 return null;
             }
 
+            @Override
             public InputStream getAsciiStream(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public InputStream getAsciiStream(String columnName) throws SQLException {
                 return null;
             }
 
+            @Override
             public BigDecimal getBigDecimal(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public BigDecimal getBigDecimal(String columnName) throws SQLException {
                 return null;
             }
 
+            @Override
             @Deprecated
             public BigDecimal getBigDecimal(int columnIndex, int scale) throws SQLException {
                 return null;
             }
 
+            @Override
             @Deprecated
             public BigDecimal getBigDecimal(String columnName, int scale) throws SQLException {
                 return null;
             }
 
+            @Override
             public InputStream getBinaryStream(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public InputStream getBinaryStream(String columnName) throws SQLException {
                 return null;
             }
 
+            @Override
             public Blob getBlob(int i) throws SQLException {
                 return null;
             }
 
+            @Override
             public Blob getBlob(String colName) throws SQLException {
                 return null;
             }
 
+            @Override
             public boolean getBoolean(int columnIndex) throws SQLException {
                 return false;
             }
 
+            @Override
             public boolean getBoolean(String columnName) throws SQLException {
                 return false;
             }
 
+            @Override
             public byte getByte(int columnIndex) throws SQLException {
                 return 0;
             }
 
+            @Override
             public byte getByte(String columnName) throws SQLException {
                 return 0;
             }
 
+            @Override
             public byte[] getBytes(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public byte[] getBytes(String columnName) throws SQLException {
                 return null;
             }
 
+            @Override
             public Reader getCharacterStream(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public Reader getCharacterStream(String columnName) throws SQLException {
                 return null;
             }
 
+            @Override
             public Clob getClob(int i) throws SQLException {
                 return null;
             }
 
+            @Override
             public Clob getClob(String colName) throws SQLException {
                 return null;
             }
 
+            @Override
             public int getConcurrency() throws SQLException {
                 return 0;
             }
 
+            @Override
             public String getCursorName() throws SQLException {
                 return null;
             }
 
+            @Override
             public Date getDate(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public Date getDate(String columnName) throws SQLException {
                 return null;
             }
 
+            @Override
             public Date getDate(int columnIndex, Calendar cal) throws SQLException {
                 return null;
             }
 
+            @Override
             public Date getDate(String columnName, Calendar cal) throws SQLException {
                 return null;
             }
 
+            @Override
             public double getDouble(int columnIndex) throws SQLException {
                 return 0;
             }
 
+            @Override
             public double getDouble(String columnName) throws SQLException {
                 return 0;
             }
 
+            @Override
             public int getFetchDirection() throws SQLException {
                 return 0;
             }
 
+            @Override
             public int getFetchSize() throws SQLException {
                 return 0;
             }
 
+            @Override
             public float getFloat(int columnIndex) throws SQLException {
                 return 0;
             }
 
+            @Override
             public float getFloat(String columnName) throws SQLException {
                 return 0;
             }
 
+            @Override
             public int getInt(int columnIndex) throws SQLException {
                 return 0;
             }
 
+            @Override
             public int getInt(String columnName) throws SQLException {
                 return 0;
             }
 
+            @Override
             public long getLong(int columnIndex) throws SQLException {
                 return 0;
             }
 
+            @Override
             public long getLong(String columnName) throws SQLException {
                 return 0;
             }
 
+            @Override
             public ResultSetMetaData getMetaData() throws SQLException {
                 return null;
             }
 
+            @Override
             public Object getObject(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public Object getObject(String columnName) throws SQLException {
                 return null;
             }
 
+            @Override
             public Object getObject(int arg0, Map<String, Class<?>> arg1) throws SQLException {
                 return null;
             }
 
+            @Override
             public Object getObject(String arg0, Map<String, Class<?>> arg1) throws SQLException {
                 return null;
             }
 
+            @Override
             public Ref getRef(int i) throws SQLException {
                 return null;
             }
 
+            @Override
             public Ref getRef(String colName) throws SQLException {
                 return null;
             }
 
+            @Override
             public int getRow() throws SQLException {
                 return 0;
             }
 
+            @Override
             public short getShort(int columnIndex) throws SQLException {
                 return 0;
             }
 
+            @Override
             public short getShort(String columnName) throws SQLException {
                 return 0;
             }
 
+            @Override
             public Statement getStatement() throws SQLException {
                 return null;
             }
 
+            @Override
             public String getString(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public String getString(String columnName) throws SQLException {
                 return null;
             }
 
+            @Override
             public Time getTime(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public Time getTime(String columnName) throws SQLException {
                 return null;
             }
 
+            @Override
             public Time getTime(int columnIndex, Calendar cal) throws SQLException {
                 return null;
             }
 
+            @Override
             public Time getTime(String columnName, Calendar cal) throws SQLException {
                 return null;
             }
 
+            @Override
             public Timestamp getTimestamp(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public Timestamp getTimestamp(String columnName) throws SQLException {
                 return null;
             }
 
+            @Override
             public Timestamp getTimestamp(int columnIndex, Calendar cal) throws SQLException {
                 return null;
             }
 
+            @Override
             public Timestamp getTimestamp(String columnName, Calendar cal) throws SQLException {
                 return null;
             }
 
+            @Override
             public int getType() throws SQLException {
                 return 0;
             }
 
+            @Override
             public URL getURL(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public URL getURL(String columnName) throws SQLException {
                 return null;
             }
 
+            @Override
             @Deprecated
             public InputStream getUnicodeStream(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             @Deprecated
             public InputStream getUnicodeStream(String columnName) throws SQLException {
                 return null;
             }
 
+            @Override
             public SQLWarning getWarnings() throws SQLException {
                 return null;
             }
 
+            @Override
             public void insertRow() throws SQLException {
             }
 
+            @Override
             public boolean isAfterLast() throws SQLException {
                 return false;
             }
 
+            @Override
             public boolean isBeforeFirst() throws SQLException {
                 return false;
             }
 
+            @Override
             public boolean isFirst() throws SQLException {
                 return false;
             }
 
+            @Override
             public boolean isLast() throws SQLException {
                 return false;
             }
 
+            @Override
             public boolean last() throws SQLException {
                 return false;
             }
 
+            @Override
             public void moveToCurrentRow() throws SQLException {
             }
 
+            @Override
             public void moveToInsertRow() throws SQLException {
             }
 
+            @Override
             public boolean next() throws SQLException {
                 return false;
             }
 
+            @Override
             public boolean previous() throws SQLException {
                 return false;
             }
 
+            @Override
             public void refreshRow() throws SQLException {
             }
 
+            @Override
             public boolean relative(int rows) throws SQLException {
                 return false;
             }
 
+            @Override
             public boolean rowDeleted() throws SQLException {
                 return false;
             }
 
+            @Override
             public boolean rowInserted() throws SQLException {
                 return false;
             }
 
+            @Override
             public boolean rowUpdated() throws SQLException {
                 return false;
             }
 
+            @Override
             public void setFetchDirection(int direction) throws SQLException {
             }
 
+            @Override
             public void setFetchSize(int rows) throws SQLException {
             }
 
+            @Override
             public void updateArray(int columnIndex, Array x) throws SQLException {
             }
 
+            @Override
             public void updateArray(String columnName, Array x) throws SQLException {
             }
 
+            @Override
             public void updateAsciiStream(int columnIndex, InputStream x, int length) throws SQLException {
             }
 
+            @Override
             public void updateAsciiStream(String columnName, InputStream x, int length) throws SQLException {
             }
 
+            @Override
             public void updateBigDecimal(int columnIndex, BigDecimal x) throws SQLException {
-
             }
 
+            @Override
             public void updateBigDecimal(String columnName, BigDecimal x) throws SQLException {
             }
 
+            @Override
             public void updateBinaryStream(int columnIndex, InputStream x, int length) throws SQLException {
             }
 
+            @Override
             public void updateBinaryStream(String columnName, InputStream x, int length) throws SQLException {
             }
 
+            @Override
             public void updateBlob(int columnIndex, Blob x) throws SQLException {
             }
 
+            @Override
             public void updateBlob(String columnName, Blob x) throws SQLException {
             }
 
+            @Override
             public void updateBoolean(int columnIndex, boolean x) throws SQLException {
             }
 
+            @Override
             public void updateBoolean(String columnName, boolean x) throws SQLException {
             }
 
+            @Override
             public void updateByte(int columnIndex, byte x) throws SQLException {
             }
 
+            @Override
             public void updateByte(String columnName, byte x) throws SQLException {
             }
 
+            @Override
             public void updateBytes(int columnIndex, byte[] x) throws SQLException {
             }
 
+            @Override
             public void updateBytes(String columnName, byte[] x) throws SQLException {
             }
 
+            @Override
             public void updateCharacterStream(int columnIndex, Reader x, int length) throws SQLException {
             }
 
+            @Override
             public void updateCharacterStream(String columnName, Reader reader, int length) throws SQLException {
             }
 
+            @Override
             public void updateClob(int columnIndex, Clob x) throws SQLException {
             }
 
+            @Override
             public void updateClob(String columnName, Clob x) throws SQLException {
             }
 
+            @Override
             public void updateDate(int columnIndex, Date x) throws SQLException {
             }
 
+            @Override
             public void updateDate(String columnName, Date x) throws SQLException {
             }
 
+            @Override
             public void updateDouble(int columnIndex, double x) throws SQLException {
             }
 
+            @Override
             public void updateDouble(String columnName, double x) throws SQLException {
             }
 
+            @Override
             public void updateFloat(int columnIndex, float x) throws SQLException {
             }
 
+            @Override
             public void updateFloat(String columnName, float x) throws SQLException {
             }
 
+            @Override
             public void updateInt(int columnIndex, int x) throws SQLException {
             }
 
+            @Override
             public void updateInt(String columnName, int x) throws SQLException {
             }
 
+            @Override
             public void updateLong(int columnIndex, long x) throws SQLException {
             }
 
+            @Override
             public void updateLong(String columnName, long x) throws SQLException {
             }
 
+            @Override
             public void updateNull(int columnIndex) throws SQLException {
             }
 
+            @Override
             public void updateNull(String columnName) throws SQLException {
             }
 
+            @Override
             public void updateObject(int columnIndex, Object x) throws SQLException {
             }
 
+            @Override
             public void updateObject(String columnName, Object x) throws SQLException {
             }
 
+            @Override
             public void updateObject(int columnIndex, Object x, int scale) throws SQLException {
             }
 
+            @Override
             public void updateObject(String columnName, Object x, int scale) throws SQLException {
             }
 
+            @Override
             public void updateRef(int columnIndex, Ref x) throws SQLException {
             }
 
+            @Override
             public void updateRef(String columnName, Ref x) throws SQLException {
             }
 
+            @Override
             public void updateRow() throws SQLException {
             }
 
+            @Override
             public void updateShort(int columnIndex, short x) throws SQLException {
             }
 
+            @Override
             public void updateShort(String columnName, short x) throws SQLException {
             }
 
+            @Override
             public void updateString(int columnIndex, String x) throws SQLException {
             }
 
+            @Override
             public void updateString(String columnName, String x) throws SQLException {
             }
 
+            @Override
             public void updateTime(int columnIndex, Time x) throws SQLException {
             }
 
+            @Override
             public void updateTime(String columnName, Time x) throws SQLException {
             }
 
+            @Override
             public void updateTimestamp(int columnIndex, Timestamp x) throws SQLException {
             }
 
+            @Override
             public void updateTimestamp(String columnName, Timestamp x) throws SQLException {
             }
 
+            @Override
             public boolean wasNull() throws SQLException {
                 return false;
             }
 
+            @Override
             public RowId getRowId(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public RowId getRowId(String columnLabel) throws SQLException {
                 return null;
             }
 
+            @Override
             public void updateRowId(int columnIndex, RowId x) throws SQLException {
             }
 
+            @Override
             public void updateRowId(String columnLabel, RowId x) throws SQLException {
             }
 
+            @Override
             public int getHoldability() throws SQLException {
                 return 0;
             }
 
+            @Override
             public void updateNString(int columnIndex, String nString) throws SQLException {
             }
 
+            @Override
             public void updateNString(String columnLabel, String nString) throws SQLException {
             }
 
+            @Override
             public void updateNClob(int columnIndex, NClob nClob) throws SQLException {
             }
 
+            @Override
             public void updateNClob(String columnLabel, NClob nClob) throws SQLException {
             }
 
+            @Override
             public NClob getNClob(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public NClob getNClob(String columnLabel) throws SQLException {
                 return null;
             }
 
+            @Override
             public SQLXML getSQLXML(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public SQLXML getSQLXML(String columnLabel) throws SQLException {
                 return null;
             }
 
+            @Override
             public void updateSQLXML(int columnIndex, SQLXML xmlObject) throws SQLException {
             }
 
+            @Override
             public void updateSQLXML(String columnLabel, SQLXML xmlObject) throws SQLException {
             }
 
+            @Override
             public String getNString(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public String getNString(String columnLabel) throws SQLException {
                 return null;
             }
 
+            @Override
             public Reader getNCharacterStream(int columnIndex) throws SQLException {
                 return null;
             }
 
+            @Override
             public Reader getNCharacterStream(String columnLabel) throws SQLException {
                 return null;
             }
 
+            @Override
             public void updateNCharacterStream(int columnIndex, Reader x, long length) throws SQLException {
             }
 
+            @Override
             public void updateNCharacterStream(String columnLabel, Reader reader, long length) throws SQLException {
             }
 
+            @Override
             public void updateAsciiStream(int columnIndex, InputStream x, long length) throws SQLException {
             }
 
+            @Override
             public void updateBinaryStream(int columnIndex, InputStream x, long length) throws SQLException {
             }
 
+            @Override
             public void updateCharacterStream(int columnIndex, Reader x, long length) throws SQLException {
             }
 
+            @Override
             public void updateAsciiStream(String columnLabel, InputStream x, long length) throws SQLException {
             }
 
+            @Override
             public void updateBinaryStream(String columnLabel, InputStream x, long length) throws SQLException {
             }
 
+            @Override
             public void updateCharacterStream(String columnLabel, Reader reader, long length) throws SQLException {
             }
 
+            @Override
             public void updateBlob(int columnIndex, InputStream inputStream, long length) throws SQLException {
             }
 
+            @Override
             public void updateBlob(String columnLabel, InputStream inputStream, long length) throws SQLException {
             }
 
+            @Override
             public void updateClob(int columnIndex, Reader reader, long length) throws SQLException {
             }
 
+            @Override
             public void updateClob(String columnLabel, Reader reader, long length) throws SQLException {
             }
 
+            @Override
             public void updateNClob(int columnIndex, Reader reader, long length) throws SQLException {
             }
 
+            @Override
             public void updateNClob(String columnLabel, Reader reader, long length) throws SQLException {
             }
 
+            @Override
             public void updateNCharacterStream(int columnIndex, Reader x) throws SQLException {
             }
 
+            @Override
             public void updateNCharacterStream(String columnLabel, Reader reader) throws SQLException {
             }
 
+            @Override
             public void updateAsciiStream(int columnIndex, InputStream x) throws SQLException {
             }
 
+            @Override
             public void updateBinaryStream(int columnIndex, InputStream x) throws SQLException {
             }
 
+            @Override
             public void updateCharacterStream(int columnIndex, Reader x) throws SQLException {
             }
 
+            @Override
             public void updateAsciiStream(String columnLabel, InputStream x) throws SQLException {
             }
 
+            @Override
             public void updateBinaryStream(String columnLabel, InputStream x) throws SQLException {
             }
 
+            @Override
             public void updateCharacterStream(String columnLabel, Reader reader) throws SQLException {
             }
 
+            @Override
             public void updateBlob(int columnIndex, InputStream inputStream) throws SQLException {
             }
 
+            @Override
             public void updateBlob(String columnLabel, InputStream inputStream) throws SQLException {
             }
 
+            @Override
             public void updateClob(int columnIndex, Reader reader) throws SQLException {
             }
 
+            @Override
             public void updateClob(String columnLabel, Reader reader) throws SQLException {
             }
 
+            @Override
             public void updateNClob(int columnIndex, Reader reader) throws SQLException {
             }
 
+            @Override
             public void updateNClob(String columnLabel, Reader reader) throws SQLException {
             }
 
+            @Override
             public <T> T getObject(int columnIndex, Class<T> type) throws SQLException {
                 return null;
             }
 
+            @Override
             public <T> T getObject(String columnLabel, Class<T> type) throws SQLException {
                 return null;
             }
 
+            @Override
             public <T> T unwrap(Class<T> iface) throws SQLException {
                 return null;
             }
 
+            @Override
             public boolean isWrapperFor(Class<?> iface) throws SQLException {
                 return false;
             }
@@ -4774,6 +4784,7 @@ public class StatementRegressionTest extends BaseTestCase {
             public Object getSyncMutex() {
                 return null;
             }
+
         };
 
         resultSetInternalMethods.close();
@@ -4782,18 +4793,23 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#34093 - Statements with batched values do not return correct values for getGeneratedKeys() when "rewriteBatchedStatements" is set to
      * "true", and the statement has an "ON DUPLICATE KEY UPDATE" clause.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug34093() throws Exception {
         Connection rewriteConn = null;
 
-        rewriteConn = getConnectionWithProps("rewriteBatchedStatements=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+        rewriteConn = getConnectionWithProps(props);
 
         checkBug34093(rewriteConn);
 
-        rewriteConn = getConnectionWithProps("rewriteBatchedStatements=true,useServerPrepStmts=true");
+        props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
+        rewriteConn = getConnectionWithProps(props);
 
         checkBug34093(rewriteConn);
     }
@@ -4912,7 +4928,11 @@ public class StatementRegressionTest extends BaseTestCase {
 
     @Test
     public void testBug34518() throws Exception {
-        Connection fetchConn = getConnectionWithProps("useCursorFetch=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.useCursorFetch.getKeyName(), "true");
+        Connection fetchConn = getConnectionWithProps(props);
         Statement fetchStmt = fetchConn.createStatement();
 
         int stmtCount = ((com.mysql.cj.jdbc.JdbcConnection) fetchConn).getActiveStatementCount();
@@ -4950,14 +4970,18 @@ public class StatementRegressionTest extends BaseTestCase {
      * "(`id` int(11) unsigned NOT NULL auto_increment," +
      * "`field` varchar(20) NOT NULL," + "`date` datetime NOT NULL," +
      * "PRIMARY KEY  (`id`)" + ") ENGINE=MyISAM DEFAULT CHARSET=latin1");
-     * 
+     *
      * this.stmt.executeUpdate("INSERT INTO testBug35307 (field) values ('works')"
      * ); }
      */
 
     @Test
     public void testBug35666() throws Exception {
-        Connection loggingConn = getConnectionWithProps("logSlowQueries=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.logSlowQueries.getKeyName(), "true");
+        Connection loggingConn = getConnectionWithProps(props);
         this.pstmt = ((com.mysql.cj.jdbc.JdbcConnection) loggingConn).serverPrepareStatement("SELECT SLEEP(4)");
         this.pstmt.execute();
     }
@@ -4972,7 +4996,11 @@ public class StatementRegressionTest extends BaseTestCase {
             this.conn.setAutoCommit(false);
             this.rs = this.conn.createStatement().executeQuery("SELECT * FROM t1 WHERE id=0 FOR UPDATE");
 
-            final Connection deadlockConn = getConnectionWithProps("includeInnodbStatusInDeadlockExceptions=true");
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.includeInnodbStatusInDeadlockExceptions.getKeyName(), "true");
+            final Connection deadlockConn = getConnectionWithProps(props);
             deadlockConn.setAutoCommit(false);
 
             final Statement deadlockStmt = deadlockConn.createStatement();
@@ -4980,6 +5008,7 @@ public class StatementRegressionTest extends BaseTestCase {
             this.rs = deadlockStmt.executeQuery("SELECT * FROM t2 WHERE id=0 FOR UPDATE");
 
             new Thread() {
+
                 @Override
                 public void run() {
                     try {
@@ -4996,6 +5025,7 @@ public class StatementRegressionTest extends BaseTestCase {
                         }
                     }
                 }
+
             }.run();
 
             this.stmt.executeUpdate("INSERT INTO t1 VALUES (0, 0)");
@@ -5013,7 +5043,11 @@ public class StatementRegressionTest extends BaseTestCase {
 
     @Test
     public void testBug39352() throws Exception {
-        Connection affectedRowsConn = getConnectionWithProps("useAffectedRows=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.useAffectedRows.getKeyName(), "true");
+        Connection affectedRowsConn = getConnectionWithProps(props);
 
         try {
 
@@ -5072,7 +5106,11 @@ public class StatementRegressionTest extends BaseTestCase {
 
                 String tableName = "testBug39956_" + engineName;
 
-                Connection twoConn = getConnectionWithProps("sessionVariables=auto_increment_increment=2");
+                Properties props = new Properties();
+                props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+                props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+                props.setProperty(PropertyKey.sessionVariables.getKeyName(), "auto_increment_increment=2");
+                Connection twoConn = getConnectionWithProps(props);
 
                 try {
                     for (int i = 0; i < 2; i++) {
@@ -5090,9 +5128,9 @@ public class StatementRegressionTest extends BaseTestCase {
                         this.rs = this.pstmt.getGeneratedKeys();
 
                         this.rs.next();
-                        assertEquals(1, this.rs.getInt(1), "For engine " + engineName + ((i == 1) ? " rewritten " : " plain "));
+                        assertEquals(1, this.rs.getInt(1), "For engine " + engineName + (i == 1 ? " rewritten " : " plain "));
                         this.rs.next();
-                        assertEquals(3, this.rs.getInt(1), "For engine " + engineName + ((i == 1) ? " rewritten " : " plain "));
+                        assertEquals(3, this.rs.getInt(1), "For engine " + engineName + (i == 1 ? " rewritten " : " plain "));
 
                         createTable(tableName, "(k int primary key auto_increment, p varchar(4)) ENGINE=" + engineName);
                         Statement twoStmt = twoConn.createStatement();
@@ -5107,7 +5145,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
                         for (int j = 0; j < 10; j++) {
                             this.rs.next();
-                            assertEquals(key, this.rs.getInt(1), "For engine " + engineName + ((i == 1) ? " rewritten " : " plain "));
+                            assertEquals(key, this.rs.getInt(1), "For engine " + engineName + (i == 1 ? " rewritten " : " plain "));
                             key += 2;
                         }
                     }
@@ -5146,7 +5184,11 @@ public class StatementRegressionTest extends BaseTestCase {
     public void testBug41161() throws Exception {
         createTable("testBug41161", "(a int, b int)");
 
-        Connection rewriteConn = getConnectionWithProps("rewriteBatchedStatements=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+        Connection rewriteConn = getConnectionWithProps(props);
 
         try {
             this.pstmt = rewriteConn.prepareStatement("INSERT INTO testBug41161 (a, b) VALUES (?, ?, ?)");
@@ -5168,7 +5210,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Ensures that cases listed in Bug#41448 actually work - we don't think there's a bug here right now
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -5186,12 +5228,10 @@ public class StatementRegressionTest extends BaseTestCase {
 
         this.stmt.executeUpdate("INSERT INTO testBug41448 (field1) VALUES ('ghi')");
 
-        try {
+        assertThrows(SQLException.class, () -> {
             this.stmt.getGeneratedKeys();
-            fail("Expected a SQLException here");
-        } catch (SQLException sqlEx) {
-            // expected
-        }
+            return null;
+        });
 
         this.stmt.execute("INSERT INTO testBug41448 (field1) VALUES ('jkl')", Statement.RETURN_GENERATED_KEYS);
         this.stmt.getGeneratedKeys();
@@ -5204,12 +5244,10 @@ public class StatementRegressionTest extends BaseTestCase {
 
         this.stmt.execute("INSERT INTO testBug41448 (field1) VALUES ('stu')");
 
-        try {
+        assertThrows(SQLException.class, () -> {
             this.stmt.getGeneratedKeys();
-            fail("Expected a SQLException here");
-        } catch (SQLException sqlEx) {
-            // expected
-        }
+            return null;
+        });
 
         this.pstmt = this.conn.prepareStatement("INSERT INTO testBug41448 (field1) VALUES (?)", Statement.RETURN_GENERATED_KEYS);
         this.pstmt.setString(1, "abc");
@@ -5235,27 +5273,28 @@ public class StatementRegressionTest extends BaseTestCase {
         this.pstmt = this.conn.prepareStatement("INSERT INTO testBug41448 (field1) VALUES (?)");
         this.pstmt.setString(1, "abc");
         this.pstmt.executeUpdate();
-        try {
+        assertThrows(SQLException.class, () -> {
             this.pstmt.getGeneratedKeys();
-            fail("Expected a SQLException here");
-        } catch (SQLException sqlEx) {
-            // expected
-        }
+            return null;
+        });
 
         this.pstmt.execute();
 
-        try {
+        assertThrows(SQLException.class, () -> {
             this.pstmt.getGeneratedKeys();
-            fail("Expected a SQLException here");
-        } catch (SQLException sqlEx) {
-            // expected
-        }
+            return null;
+        });
     }
 
     @Test
     public void testBug48172() throws Exception {
         createTable("testBatchInsert", "(a INT PRIMARY KEY AUTO_INCREMENT)");
-        Connection rewriteConn = getConnectionWithProps("rewriteBatchedStatements=true,dumpQueriesOnException=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+        props.setProperty(PropertyKey.dumpQueriesOnException.getKeyName(), "true");
+        Connection rewriteConn = getConnectionWithProps(props);
         assertEquals("0", getSingleIndexedValueWithQuery(rewriteConn, 2, "SHOW SESSION STATUS LIKE 'Com_insert'").toString());
 
         this.pstmt = rewriteConn.prepareStatement("INSERT INTO testBatchInsert VALUES (?)");
@@ -5304,31 +5343,48 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#41532 - regression in performance for batched inserts when using ON DUPLICATE KEY UPDATE
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug41532() throws Exception {
+        this.rs = this.stmt.executeQuery("SHOW VARIABLES LIKE 'max_allowed_packet'");
+        this.rs.next();
+        long len = 1024 * 1024 * 2;
+        long defaultMaxAllowedPacket = this.rs.getInt(2);
+        boolean changeMaxAllowedPacket = defaultMaxAllowedPacket < len;
+
         createTable("testBug41532", "(ID INTEGER, S1 VARCHAR(100), S2 VARCHAR(100), S3 VARCHAR(100), D1 DATETIME, D2 DATETIME, D3 DATETIME, "
                 + "N1 DECIMAL(28,6), N2 DECIMAL(28,6), N3 DECIMAL(28,6), UNIQUE KEY UNIQUE_KEY_TEST_DUPLICATE (ID) )");
 
-        int numTests = 5000;
-        Connection rewriteConn = getConnectionWithProps("useSSL=false,allowPublicKeyRetrieval=true,rewriteBatchedStatements=true,dumpQueriesOnException=true");
+        try {
+            if (changeMaxAllowedPacket) {
+                this.stmt.executeUpdate("SET GLOBAL max_allowed_packet=" + len);
+            }
 
-        assertEquals("0", getSingleIndexedValueWithQuery(rewriteConn, 2, "SHOW SESSION STATUS LIKE 'Com_insert'").toString());
-        long batchedTime = timeBatch(rewriteConn, numTests);
-        assertEquals("1", getSingleIndexedValueWithQuery(rewriteConn, 2, "SHOW SESSION STATUS LIKE 'Com_insert'").toString());
+            int numTests = 5000;
+            Connection rewriteConn = getConnectionWithProps(
+                    "useSSL=false,allowPublicKeyRetrieval=true,rewriteBatchedStatements=true,dumpQueriesOnException=true");
 
-        this.stmt.executeUpdate("TRUNCATE TABLE testBug41532");
+            assertEquals("0", getSingleIndexedValueWithQuery(rewriteConn, 2, "SHOW SESSION STATUS LIKE 'Com_insert'").toString());
+            long batchedTime = timeBatch(rewriteConn, numTests);
+            assertEquals("1", getSingleIndexedValueWithQuery(rewriteConn, 2, "SHOW SESSION STATUS LIKE 'Com_insert'").toString());
 
-        assertEquals("0", getSingleIndexedValueWithQuery(this.conn, 2, "SHOW SESSION STATUS LIKE 'Com_insert'").toString());
-        long unbatchedTime = timeBatch(this.conn, numTests);
-        assertEquals(String.valueOf(numTests), getSingleIndexedValueWithQuery(this.conn, 2, "SHOW SESSION STATUS LIKE 'Com_insert'").toString());
-        assertTrue(batchedTime < unbatchedTime);
+            this.stmt.executeUpdate("TRUNCATE TABLE testBug41532");
 
-        rewriteConn = getConnectionWithProps(
-                "useSSL=false,allowPublicKeyRetrieval=true,rewriteBatchedStatements=true,useCursorFetch=true,defaultFetchSize=10000");
-        timeBatch(rewriteConn, numTests);
+            assertEquals("0", getSingleIndexedValueWithQuery(this.conn, 2, "SHOW SESSION STATUS LIKE 'Com_insert'").toString());
+            long unbatchedTime = timeBatch(this.conn, numTests);
+            assertEquals(String.valueOf(numTests), getSingleIndexedValueWithQuery(this.conn, 2, "SHOW SESSION STATUS LIKE 'Com_insert'").toString());
+            assertTrue(batchedTime < unbatchedTime);
+
+            rewriteConn = getConnectionWithProps(
+                    "useSSL=false,allowPublicKeyRetrieval=true,rewriteBatchedStatements=true,useCursorFetch=true,defaultFetchSize=10000");
+            timeBatch(rewriteConn, numTests);
+        } finally {
+            if (changeMaxAllowedPacket) {
+                this.stmt.executeUpdate("SET GLOBAL max_allowed_packet=" + defaultMaxAllowedPacket);
+            }
+        }
     }
 
     private long timeBatch(Connection c, int numberOfRows) throws SQLException {
@@ -5368,7 +5424,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#44056 - Statement.getGeneratedKeys() retains result set instances until statement is closed.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -5396,43 +5452,6 @@ public class StatementRegressionTest extends BaseTestCase {
         assertEquals(0, ((com.mysql.cj.jdbc.JdbcStatement) newStmt).getOpenResultSetCount());
         this.rs.close();
         assertEquals(0, ((com.mysql.cj.jdbc.JdbcStatement) newStmt).getOpenResultSetCount());
-    }
-
-    /**
-     * Bug #41730 - SQL Injection when using U+00A5 and SJIS/Windows-31J
-     * 
-     * @throws Exception
-     */
-    @Test
-    public void testBug41730() throws Exception {
-        try {
-            "".getBytes("sjis");
-        } catch (UnsupportedEncodingException ex) {
-            return; // test doesn't work on this platform
-        }
-
-        Connection conn2 = null;
-        PreparedStatement pstmt2 = null;
-        try {
-            conn2 = getConnectionWithProps("characterEncoding=sjis");
-            pstmt2 = conn2.prepareStatement("select ?");
-            pstmt2.setString(1, "\u00A5'");
-            // this will throw an exception with a syntax error if it fails
-            this.rs = pstmt2.executeQuery();
-        } finally {
-            try {
-                if (pstmt2 != null) {
-                    pstmt2.close();
-                }
-            } catch (SQLException ex) {
-            }
-            try {
-                if (conn2 != null) {
-                    conn2.close();
-                }
-            } catch (SQLException ex) {
-            }
-        }
     }
 
     @Test
@@ -5485,7 +5504,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Bug #42253 - multiple escaped quotes cause exception from EscapeProcessor.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -5498,7 +5517,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Bug #41566 - Quotes within comments not correctly ignored by escape parser
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -5509,15 +5528,18 @@ public class StatementRegressionTest extends BaseTestCase {
     }
 
     /*
-     * Bug #40439 - Error rewriting batched statement if table name ends with
-     * "values".
+     * Bug #40439 - Error rewriting batched statement if table name ends with "values".
      */
     @Test
     public void testBug40439() throws Exception {
         Connection conn2 = null;
         try {
             createTable("testBug40439VALUES", "(x int)");
-            conn2 = getConnectionWithProps("rewriteBatchedStatements=true");
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+            conn2 = getConnectionWithProps(props);
             PreparedStatement ps = conn2.prepareStatement("insert into testBug40439VALUES (x) values (?)");
             ps.setInt(1, 1);
             ps.addBatch();
@@ -5535,12 +5557,12 @@ public class StatementRegressionTest extends BaseTestCase {
     }
 
     public static class Bug39426Interceptor extends BaseQueryInterceptor {
+
         public static List<Integer> vals = new ArrayList<>();
         String prevSql;
 
         @Override
         public <T extends Resultset> T preProcess(Supplier<String> sql, Query interceptedQuery) {
-
             if (interceptedQuery instanceof ClientPreparedStatement) {
                 String asSql = interceptedQuery.toString();
                 int firstColon = asSql.indexOf(":");
@@ -5560,17 +5582,20 @@ public class StatementRegressionTest extends BaseTestCase {
             }
             return null;
         }
+
     }
 
     /**
      * Bug #39426 - executeBatch passes most recent PreparedStatement params to StatementInterceptor
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug39426() throws Exception {
         for (boolean useSPS : new boolean[] { false, true }) {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.queryInterceptors.getKeyName(), "testsuite.regression.StatementRegressionTest$Bug39426Interceptor");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
 
@@ -5603,7 +5628,11 @@ public class StatementRegressionTest extends BaseTestCase {
         createTable("testBugDupeKeySingle", "(field1 int not null primary key)");
         Connection conn2 = null;
         try {
-            conn2 = getConnectionWithProps("rewriteBatchedStatements=true");
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+            conn2 = getConnectionWithProps(props);
 
             this.pstmt = conn2.prepareStatement("INSERT INTO testBugDupeKeySingle VALUES (?) ON DUPLICATE KEY UPDATE field1=VALUES(field1)");
             this.pstmt.setInt(1, 1);
@@ -5636,7 +5665,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Bug #37458 - MySQL 5.1 returns generated keys in ascending order
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -5664,7 +5693,10 @@ public class StatementRegressionTest extends BaseTestCase {
         createTable("testBug34555", "(field1 int)", "INNODB");
         this.stmt.executeUpdate("INSERT INTO testBug34555 VALUES (0)");
 
-        final Connection lockerConn = getConnectionWithProps("");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        final Connection lockerConn = getConnectionWithProps(props);
         lockerConn.setAutoCommit(false);
         lockerConn.createStatement().execute("SELECT * FROM testBug34555 WHERE field1=0 FOR UPDATE");
 
@@ -5691,7 +5723,11 @@ public class StatementRegressionTest extends BaseTestCase {
     public void testBug46788() throws Exception {
         createTable("testBug46788", "(modified varchar(32), id varchar(32))");
 
-        Connection rewriteConn = getConnectionWithProps("rewriteBatchedStatements=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+        Connection rewriteConn = getConnectionWithProps(props);
 
         this.pstmt = rewriteConn.prepareStatement("insert into testBug46788 (modified,id) values (?,?) ON DUPLICATE KEY UPDATE modified=?");
 
@@ -5709,7 +5745,11 @@ public class StatementRegressionTest extends BaseTestCase {
     @Test
     public void testBug31193() throws Exception {
         createTable("bug31193", "(sometime datetime, junk text)");
-        Connection fetchConn = getConnectionWithProps("useCursorFetch=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.useCursorFetch.getKeyName(), "true");
+        Connection fetchConn = getConnectionWithProps(props);
         Statement fetchStmt = fetchConn.createStatement();
 
         fetchStmt.setFetchSize(10000);
@@ -5728,6 +5768,8 @@ public class StatementRegressionTest extends BaseTestCase {
     @Test
     public void testBug51776() throws Exception {
         Properties props = getHostFreePropertiesFromTestsuiteUrl();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.socketFactory.getKeyName(), "testsuite.UnreliableSocketFactory");
 
         Properties parsed = getPropertiesFromTestsuiteUrl();
@@ -5742,17 +5784,19 @@ public class StatementRegressionTest extends BaseTestCase {
         testConn.setAutoCommit(false);
         testConn.createStatement().execute("SELECT 1");
         UnreliableSocketFactory.downHost("first");
-        try {
+        assertThrows("Should receive SQLException on rollback().", SQLException.class, () -> {
             testConn.rollback();
-            fail("Should receive SQLException on rollback().");
-        } catch (SQLException e) {
-
-        }
+            return null;
+        });
     }
 
     @Test
     public void testBug51666() throws Exception {
-        Connection testConn = getConnectionWithProps("queryInterceptors=" + TestBug51666QueryInterceptor.class.getName());
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.queryInterceptors.getKeyName(), TestBug51666QueryInterceptor.class.getName());
+        Connection testConn = getConnectionWithProps(props);
         createTable("testQueryInterceptorCount", "(field1 int)");
         this.stmt.executeUpdate("INSERT INTO testQueryInterceptorCount VALUES (0)");
         ResultSet testRs = testConn.createStatement().executeQuery("SHOW SESSION STATUS LIKE 'Com_select'");
@@ -5792,6 +5836,7 @@ public class StatementRegressionTest extends BaseTestCase {
         public void destroy() {
             this.connection = null;
         }
+
     }
 
     @Test
@@ -5799,7 +5844,11 @@ public class StatementRegressionTest extends BaseTestCase {
         createTable("testReversalOfScanFlags", "(field1 int)");
         this.stmt.executeUpdate("INSERT INTO testReversalOfScanFlags VALUES (1),(2),(3)");
 
-        Connection scanningConn = getConnectionWithProps("queryInterceptors=" + ScanDetectingInterceptor.class.getName());
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.queryInterceptors.getKeyName(), ScanDetectingInterceptor.class.getName());
+        Connection scanningConn = getConnectionWithProps(props);
 
         try {
             this.rs = scanningConn.createStatement().executeQuery("SELECT field1 FROM testReversalOfScanFlags");
@@ -5811,12 +5860,12 @@ public class StatementRegressionTest extends BaseTestCase {
     }
 
     public static class ScanDetectingInterceptor extends BaseQueryInterceptor {
+
         static boolean hasSeenScan = false;
         static boolean hasSeenBadIndex = false;
 
         @Override
         public <T extends Resultset> T postProcess(Supplier<String> sql, Query interceptedQuery, T originalResultSet, ServerSession serverSession) {
-
             if (serverSession.noIndexUsed()) {
                 hasSeenScan = true;
             }
@@ -5827,17 +5876,22 @@ public class StatementRegressionTest extends BaseTestCase {
 
             return null;
         }
+
     }
 
     /**
      * Tests fix for Bug#51704, rewritten batched statements don't honor escape processing flag of Statement that they are created for
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug51704() throws Exception {
         createTable("testBug51704", "(field1 TIMESTAMP)");
-        Connection rewriteConn = getConnectionWithProps("rewriteBatchedStatements=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+        Connection rewriteConn = getConnectionWithProps(props);
         Statement rewriteStmt = rewriteConn.createStatement();
 
         try {
@@ -5847,7 +5901,7 @@ public class StatementRegressionTest extends BaseTestCase {
                 rewriteStmt.addBatch("INSERT INTO testBug51704 VALUES ({tsp '2002-11-12 10:00:00'})");
             }
 
-            rewriteStmt.executeBatch(); // this should pass, because mysqld doesn't validate any escape sequences, 
+            rewriteStmt.executeBatch(); // this should pass, because mysqld doesn't validate any escape sequences,
                                        // it just strips them, where our escape processor validates them
 
             Statement batchStmt = this.conn.createStatement();
@@ -5861,7 +5915,11 @@ public class StatementRegressionTest extends BaseTestCase {
 
     @Test
     public void testBug54175() throws Exception {
-        Connection utf8conn = getConnectionWithProps("characterEncoding=utf8");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.characterEncoding.getKeyName(), "UTF-8");
+        Connection utf8conn = getConnectionWithProps(props);
 
         createTable("testBug54175", "(a VARCHAR(10)) CHARACTER SET utf8mb4");
         this.stmt.execute("INSERT INTO testBug54175 VALUES(0xF0AFA6B2)");
@@ -5874,7 +5932,7 @@ public class StatementRegressionTest extends BaseTestCase {
      * Tests fix for Bug#58728, NPE in com.mysql.jdbc.StatementWrappe.getResultSet()
      * ((com.mysql.jdbc.ResultSetInternalMethods) rs).setWrapperStatement(this);
      * when rs is null
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -5884,6 +5942,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
         MysqlConnectionPoolDataSource pds = new MysqlConnectionPoolDataSource();
         pds.setUrl(dbUrl);
+        pds.<SslMode>getEnumProperty(PropertyKey.sslMode).setValue(SslMode.DISABLED);
+        pds.getBooleanProperty(PropertyKey.allowPublicKeyRetrieval).setValue(true);
         Statement stmt1 = pds.getPooledConnection().getConnection().createStatement();
         stmt1.executeUpdate("UPDATE testbug58728 SET txt = 'New text' WHERE Id > 0");
         ResultSet rs1 = stmt1.getResultSet();
@@ -5987,10 +6047,12 @@ public class StatementRegressionTest extends BaseTestCase {
     @Test
     public void testbug12565726() throws Exception {
         // Not putting the space between VALUES() and ON DUPLICATE KEY UPDATE
-        // causes C/J a) enter rewriting the query altrhough it has ON UPDATE 
+        // causes C/J a) enter rewriting the query altrhough it has ON UPDATE
         // and b) to generate the wrong query with multiple ON DUPLICATE KEY
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "false");
         props.setProperty(PropertyKey.enablePacketDebug.getKeyName(), "true");
@@ -6044,6 +6106,8 @@ public class StatementRegressionTest extends BaseTestCase {
         PreparedStatement s = null;
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
 
             _conn = getConnectionWithProps(props);
@@ -6077,12 +6141,12 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#40279 - Timestamp values get truncated when passed as prepared statement parameters
      * (and duplicate BUG#60584 - prepared statements truncate milliseconds)
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug40279() throws Exception {
-        assumeTrue(versionMeetsMinimum(5, 6, 4));
+        assumeTrue(versionMeetsMinimum(5, 6, 4), "MySQL 5.6.4+ is required to run this test.");
 
         createTable("testBug40279", "(f1 int, f2 timestamp(6))");
 
@@ -6093,6 +6157,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.connectionTimeZone.getKeyName(), "UTC");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "false");
             ps_conn = getConnectionWithProps(props);
@@ -6130,7 +6196,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#35653 - executeQuery() in Statement.java let "TRUNCATE" queries being executed.
      * "RENAME" is also filtered now.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -6155,7 +6221,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#64805 - StatementImpl$CancelTask occasionally throws NullPointerExceptions.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -6177,16 +6243,17 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * WL#4897 - Add EXPLAIN INSERT/UPDATE/DELETE
-     * 
+     *
      * Added support for EXPLAIN INSERT/REPLACE/UPDATE/DELETE. Connector/J must issue a warning containing the execution plan for slow queries when connection
      * properties logSlowQueries=true and explainSlowQueries=true are used.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testExecutionPlanForSlowQueries() throws Exception {
         // once slow query (with execution plan) warning is sent to System.err, we capture messages sent here to check proper operation.
         final class TestHandler {
+
             // System.err diversion handling
             PrintStream systemErrBackup = null;
             ByteArrayOutputStream systemErrDetour = null;
@@ -6223,7 +6290,12 @@ public class StatementRegressionTest extends BaseTestCase {
 
             Connection getNewConnectionForSlowQueries() throws SQLException {
                 releaseConnectionResources();
-                this.testConn = getConnectionWithProps("logSlowQueries=true,explainSlowQueries=true");
+                Properties props = new Properties();
+                props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+                props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+                props.setProperty(PropertyKey.logSlowQueries.getKeyName(), "true");
+                props.setProperty(PropertyKey.explainSlowQueries.getKeyName(), "true");
+                this.testConn = getConnectionWithProps(props);
                 Statement st = this.testConn.createStatement();
                 // execute several fast queries to unlock slow query analysis and lower query execution time mean
                 for (int i = 0; i < 25; i++) {
@@ -6238,6 +6310,7 @@ public class StatementRegressionTest extends BaseTestCase {
                     this.testConn = null;
                 }
             }
+
         }
 
         TestHandler testHandler = new TestHandler();
@@ -6276,7 +6349,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#68562 - Combination rewriteBatchedStatements and useAffectedRows not working as expected
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -6286,7 +6359,6 @@ public class StatementRegressionTest extends BaseTestCase {
     }
 
     private void testBug68562BatchWithSize(int batchSize) throws Exception {
-
         createTable("testBug68562_found", "(id INTEGER NOT NULL PRIMARY KEY, name VARCHAR(255) NOT NULL, version VARCHAR(255)) ENGINE=InnoDB;");
         createTable("testBug68562_affected", "(id INTEGER NOT NULL PRIMARY KEY, name VARCHAR(255) NOT NULL, version VARCHAR(255)) ENGINE=InnoDB;");
 
@@ -6333,10 +6405,11 @@ public class StatementRegressionTest extends BaseTestCase {
 
     private int[] testBug68562ExecuteBatch(int batchSize, boolean useAffectedRows, boolean rewriteBatchedStatements, boolean realUpdate)
             throws ClassNotFoundException, SQLException {
-
         String tableName = "testBug68562";
 
         Properties properties = new Properties();
+        properties.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        properties.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         if (useAffectedRows) {
             properties.setProperty(PropertyKey.useAffectedRows.getKeyName(), "true");
             tableName += "_affected";
@@ -6368,12 +6441,16 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#55340 - initializeResultsMetadataFromCache fails on second call to stored proc
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug55340() throws Exception {
-        Connection testConnCacheRSMD = getConnectionWithProps("cacheResultSetMetadata=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.cacheResultSetMetadata.getKeyName(), "true");
+        Connection testConnCacheRSMD = getConnectionWithProps(props);
         ResultSetMetaData rsmd;
 
         createTable("testBug55340", "(col1 INT, col2 CHAR(10))");
@@ -6412,7 +6489,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#71396 - setMaxRows (SQL_SELECT_LIMIT) from one query used in later queries (sometimes)
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -6436,7 +6513,10 @@ public class StatementRegressionTest extends BaseTestCase {
         /*
          * Case 1: Statement.executeQuery() and Statement.execute() with plain Connection.
          */
-        testConn = getConnectionWithProps("");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        testConn = getConnectionWithProps(props);
 
         // safety check
         testBug71396StatementMultiCheck(testConn, queries, new int[] { 2, 4, 3, 3, 3 });
@@ -6459,7 +6539,7 @@ public class StatementRegressionTest extends BaseTestCase {
         /*
          * Case 2: PreparedStatement.executeQuery() and PreparedStatement.execute() with plain Connection.
          */
-        testConn = getConnectionWithProps("");
+        testConn = getConnectionWithProps(props);
 
         // safety check
         testBug71396PrepStatementMultiCheck(testConn, queries, new int[] { 2, 4, 3, 3, 3 });
@@ -6487,7 +6567,8 @@ public class StatementRegressionTest extends BaseTestCase {
          * Case 3: PreparedStatement.executeQuery() and PreparedStatement.execute() with
          * Connection[useServerPrepStmts=true].
          */
-        testConn = getConnectionWithProps("useServerPrepStmts=true");
+        props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
+        testConn = getConnectionWithProps(props);
 
         // safety check
         testBug71396PrepStatementMultiCheck(testConn, queries, new int[] { 2, 4, 3, 3, 3 });
@@ -6514,7 +6595,9 @@ public class StatementRegressionTest extends BaseTestCase {
         /*
          * Case 4: Statement.executeQuery() and Statement.execute() with Connection[maxRows=2].
          */
-        testConn = getConnectionWithProps("maxRows=2");
+        props.remove(PropertyKey.useServerPrepStmts.getKeyName());
+        props.setProperty(PropertyKey.maxRows.getKeyName(), "2");
+        testConn = getConnectionWithProps(props);
 
         // safety check
         testBug71396StatementMultiCheck(testConn, queries, new int[] { 2, 2, 2, 2, 2 });
@@ -6537,7 +6620,7 @@ public class StatementRegressionTest extends BaseTestCase {
         /*
          * Case 5: PreparedStatement.executeQuery() and PreparedStatement.execute() with Connection[maxRows=2].
          */
-        testConn = getConnectionWithProps("maxRows=2");
+        testConn = getConnectionWithProps(props);
 
         // safety check
         testBug71396PrepStatementMultiCheck(testConn, queries, new int[] { 2, 2, 2, 2, 2 });
@@ -6565,7 +6648,8 @@ public class StatementRegressionTest extends BaseTestCase {
          * Case 6: PreparedStatement.executeQuery() and PreparedStatement.execute() with
          * Connection[useServerPrepStmts=true;maxRows=2].
          */
-        testConn = getConnectionWithProps("maxRows=2,useServerPrepStmts=true");
+        props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
+        testConn = getConnectionWithProps(props);
 
         // safety check
         testBug71396PrepStatementMultiCheck(testConn, queries, new int[] { 2, 2, 2, 2, 2 });
@@ -6593,32 +6677,41 @@ public class StatementRegressionTest extends BaseTestCase {
          * Case 7: Multiple combinations between maxRows connection prop, Statement.setMaxRows() and LIMIT clause.
          * Covers some cases not tested previously.
          */
-        testBug71396MultiSettingsCheck("", -1, 1, 1);
-        testBug71396MultiSettingsCheck("", -1, 2, 2);
-        testBug71396MultiSettingsCheck("", 1, 1, 1);
-        testBug71396MultiSettingsCheck("", 1, 2, 1);
-        testBug71396MultiSettingsCheck("", 2, 1, 1);
-        testBug71396MultiSettingsCheck("", 2, 2, 2);
+        props.clear();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
 
-        testBug71396MultiSettingsCheck("maxRows=1", -1, 1, 1);
-        testBug71396MultiSettingsCheck("maxRows=1", -1, 2, 1);
-        testBug71396MultiSettingsCheck("maxRows=1", 1, 1, 1);
-        testBug71396MultiSettingsCheck("maxRows=1", 1, 2, 1);
-        testBug71396MultiSettingsCheck("maxRows=1", 2, 1, 1);
-        testBug71396MultiSettingsCheck("maxRows=1", 2, 2, 2);
+        testBug71396MultiSettingsCheck(props, -1, 1, 1);
+        testBug71396MultiSettingsCheck(props, -1, 2, 2);
+        testBug71396MultiSettingsCheck(props, 1, 1, 1);
+        testBug71396MultiSettingsCheck(props, 1, 2, 1);
+        testBug71396MultiSettingsCheck(props, 2, 1, 1);
+        testBug71396MultiSettingsCheck(props, 2, 2, 2);
 
-        testBug71396MultiSettingsCheck("maxRows=2", -1, 1, 1);
-        testBug71396MultiSettingsCheck("maxRows=2", -1, 2, 2);
-        testBug71396MultiSettingsCheck("maxRows=2", 1, 1, 1);
-        testBug71396MultiSettingsCheck("maxRows=2", 1, 2, 1);
-        testBug71396MultiSettingsCheck("maxRows=2", 2, 1, 1);
-        testBug71396MultiSettingsCheck("maxRows=2", 2, 2, 2);
+        props.setProperty(PropertyKey.maxRows.getKeyName(), "1");
+        testBug71396MultiSettingsCheck(props, -1, 1, 1);
+        testBug71396MultiSettingsCheck(props, -1, 2, 1);
+        testBug71396MultiSettingsCheck(props, 1, 1, 1);
+        testBug71396MultiSettingsCheck(props, 1, 2, 1);
+        testBug71396MultiSettingsCheck(props, 2, 1, 1);
+        testBug71396MultiSettingsCheck(props, 2, 2, 2);
+
+        props.setProperty(PropertyKey.maxRows.getKeyName(), "2");
+        testBug71396MultiSettingsCheck(props, -1, 1, 1);
+        testBug71396MultiSettingsCheck(props, -1, 2, 2);
+        testBug71396MultiSettingsCheck(props, 1, 1, 1);
+        testBug71396MultiSettingsCheck(props, 1, 2, 1);
+        testBug71396MultiSettingsCheck(props, 2, 1, 1);
+        testBug71396MultiSettingsCheck(props, 2, 2, 2);
 
         // Case 8: New session due to user change
         createUser("'testBug71396User'@'%'", "IDENTIFIED BY 'testBug71396User'");
         this.stmt.execute("GRANT SELECT ON *.* TO 'testBug71396User'@'%'");
 
-        testConn = getConnectionWithProps("");
+        props.clear();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        testConn = getConnectionWithProps(props);
         testStmt = testBug71396StatementInit(testConn, 5);
 
         ((JdbcConnection) testConn).changeUser("testBug71396User", "testBug71396User");
@@ -6642,7 +6735,7 @@ public class StatementRegressionTest extends BaseTestCase {
         testConn.close();
 
         // Case 9: New session due to reconnection
-        testConn = getConnectionWithProps("");
+        testConn = getConnectionWithProps(props);
         testStmt = testBug71396StatementInit(testConn, 5);
 
         ((JdbcConnection) testConn).createNewIO(true); // true or false argument is irrelevant for this test case
@@ -6667,7 +6760,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Initializes and returns a Statement with maxRows defined. Tests the SQL_SELECT_LIMIT defined. Executing this query also forces this limit to be defined
      * at session level.
-     * 
+     *
      * @param testConn
      * @param maxRows
      * @return a Statement
@@ -6688,16 +6781,14 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Executes a set of queries using a Statement (newly created) and tests if the results count is the expected.
-     * 
+     *
      * @param testConn
      * @param queries
      * @param expRowCount
      * @throws SQLException
      */
     private void testBug71396StatementMultiCheck(Connection testConn, String[] queries, int[] expRowCount) throws SQLException {
-        if (queries.length != expRowCount.length) {
-            fail("Bad arguments!");
-        }
+        assertTrue(queries.length == expRowCount.length, "Bad arguments!");
         Statement testStmt = testConn.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
         testBug71396StatementMultiCheck(testStmt, queries, expRowCount);
         testStmt.close();
@@ -6705,16 +6796,14 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Executes a set of queries using a Statement and tests if the results count is the expected.
-     * 
+     *
      * @param testStmt
      * @param queries
      * @param expRowCount
      * @throws SQLException
      */
     private void testBug71396StatementMultiCheck(Statement testStmt, String[] queries, int[] expRowCount) throws SQLException {
-        if (queries.length != expRowCount.length) {
-            fail("Bad arguments!");
-        }
+        assertTrue(queries.length == expRowCount.length, "Bad arguments!");
         for (int i = 0; i < queries.length; i++) {
             testBug71396StatementCheck(testStmt, queries[i], expRowCount[i]);
         }
@@ -6722,7 +6811,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Executes one query using a Statement and tests if the results count is the expected.
-     * 
+     *
      * @param testStmt
      * @param query
      * @param expRowCount
@@ -6745,7 +6834,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Initializes and returns an array of PreparedStatements, with maxRows defined, for a set of queries.
-     * 
+     *
      * @param testConn
      * @param queries
      * @param maxRows
@@ -6766,7 +6855,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Closes all PreparedStatements in the array.
-     * 
+     *
      * @param testPStmt
      * @throws SQLException
      */
@@ -6778,16 +6867,14 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Executes a set of queries using newly created PreparedStatements and tests if the results count is the expected.
-     * 
+     *
      * @param testConn
      * @param queries
      * @param expRowCount
      * @throws SQLException
      */
     private void testBug71396PrepStatementMultiCheck(Connection testConn, String[] queries, int[] expRowCount) throws SQLException {
-        if (queries.length != expRowCount.length) {
-            fail("Bad arguments!");
-        }
+        assertTrue(queries.length == expRowCount.length, "Bad arguments!");
         for (int i = 0; i < queries.length; i++) {
             testBug71396PrepStatementCheck(testConn, queries[i], expRowCount[i], -1);
         }
@@ -6795,16 +6882,14 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Executes a set of queries using the given PreparedStatements and tests if the results count is the expected.
-     * 
+     *
      * @param testPStmt
      * @param queries
      * @param expRowCount
      * @throws SQLException
      */
     private void testBug71396PrepStatementMultiCheck(PreparedStatement[] testPStmt, String[] queries, int[] expRowCount) throws SQLException {
-        if (testPStmt.length != queries.length || testPStmt.length != expRowCount.length) {
-            fail("Bad arguments!");
-        }
+        assertFalse(testPStmt.length != queries.length || testPStmt.length != expRowCount.length, "Bad arguments!");
         for (int i = 0; i < queries.length; i++) {
             testBug71396PrepStatementCheck(testPStmt[i], queries[i], expRowCount[i]);
         }
@@ -6812,7 +6897,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Executes one query using a newly created PreparedStatement, setting its maxRows limit, and tests if the results count is the expected.
-     * 
+     *
      * @param testConn
      * @param query
      * @param expRowCount
@@ -6832,7 +6917,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Executes one query using a PreparedStatement and tests if the results count is the expected.
-     * 
+     *
      * @param testPStmt
      * @param query
      * @param expRowCount
@@ -6856,14 +6941,14 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Executes a query containing the clause LIMIT with a Statement and a PreparedStatement, using a combination of Connection properties, maxRows value and
      * limit clause value, and tests if the results count is the expected.
-     * 
+     *
      * @param connProps
      * @param maxRows
      * @param limitClause
      * @param expRowCount
      * @throws SQLException
      */
-    private void testBug71396MultiSettingsCheck(String connProps, int maxRows, int limitClause, int expRowCount) throws SQLException {
+    private void testBug71396MultiSettingsCheck(Properties connProps, int maxRows, int limitClause, int expRowCount) throws SQLException {
         Connection testConn = getConnectionWithProps(connProps);
 
         Statement testStmt = testConn.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
@@ -6881,7 +6966,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for 18091639 - STRINGINDEXOUTOFBOUNDSEXCEPTION IN PREPAREDSTATEMENT.SETTIMESTAMP WITH 5.6.15
-     * 
+     *
      * @throws SQLException
      */
     @Test
@@ -6895,11 +6980,9 @@ public class StatementRegressionTest extends BaseTestCase {
         str = TimeUtil.formatNanos(900000000, 0);
         assertEquals("0", str);
 
-        assertThrows(WrongArgumentException.class, "fsp value must be in 0 to 6 range but was 9", new Callable<Void>() {
-            public Void call() throws Exception {
-                TimeUtil.formatNanos(1, 9);
-                return null;
-            }
+        assertThrows(WrongArgumentException.class, "fsp value must be in 0 to 6 range but was 9", () -> {
+            TimeUtil.formatNanos(1, 9);
+            return null;
         });
 
         str = TimeUtil.formatNanos(1, 6);
@@ -6914,11 +6997,9 @@ public class StatementRegressionTest extends BaseTestCase {
         str = TimeUtil.formatNanos(123999, 4);
         assertEquals("0001", str);
 
-        assertThrows(WrongArgumentException.class, "nanos value must be in 0 to 999999999 range but was 1000000010", new Callable<Void>() {
-            public Void call() throws Exception {
-                TimeUtil.formatNanos(1000000010, 6);
-                return null;
-            }
+        assertThrows(WrongArgumentException.class, "nanos value must be in 0 to 999999999 range but was 1000000010", () -> {
+            TimeUtil.formatNanos(1000000010, 6);
+            return null;
         });
 
         str = TimeUtil.formatNanos(100000000, 6);
@@ -6927,15 +7008,16 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#66947 (16004987) - Calling ServerPreparedStatement.close() twice corrupts cached statements
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug66947() throws Exception {
-
         Connection con = null;
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
             props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), "true");
             props.setProperty(PropertyKey.prepStmtCacheSize.getKeyName(), "2");
@@ -6998,14 +7080,16 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#68916 - closeOnCompletion doesn't work.
-     * 
+     *
      * This test requires help and timezone tables in mysql database to be initialized, see http://dev.mysql.com/doc/refman/5.7/en/time-zone-support.html and
      * http://dev.mysql.com/doc/refman/5.7/en/server-side-help-support.html
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug68916() throws Exception {
+        assumeTrue(supportsTimeZoneNames(this.stmt), "This test requies the server with populated time zone tables.");
+
         // Prepare common test objects
         createProcedure("testBug68916_proc", "() BEGIN SELECT 1; SELECT 2; SELECT 3; END");
         createTable("testBug68916_tbl", "(fld1 INT NOT NULL AUTO_INCREMENT, fld2 INT, PRIMARY KEY(fld1))");
@@ -8333,6 +8417,7 @@ public class StatementRegressionTest extends BaseTestCase {
     }
 
     private class subTestBug68916ConcurrentTask implements Callable<String> {
+
         Connection testConnection = null;
         String query = null;
         boolean closeOnCompletionIsOverriden = false;
@@ -8343,6 +8428,7 @@ public class StatementRegressionTest extends BaseTestCase {
             this.closeOnCompletionIsOverriden = closeOnCompletionIsOverriden;
         }
 
+        @Override
         public String call() throws Exception {
             String threadName = Thread.currentThread().getName();
             long startTime = System.currentTimeMillis();
@@ -8384,11 +8470,12 @@ public class StatementRegressionTest extends BaseTestCase {
             }
             return threadName + ": processed " + count1 + " rows in " + (stopTime - startTime) + " milliseconds.";
         }
+
     }
 
     /**
      * Tests fix for Bug#71672 - Every SQL statement is checked if it contains "ON DUPLICATE KEY UPDATE" or not
-     * 
+     *
      * @throws SQLException
      */
     @Test
@@ -8439,10 +8526,14 @@ public class StatementRegressionTest extends BaseTestCase {
         final int[] expectedGenKeysForBatchPStmtRW = new int[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
 
         // Test multiple connection props
+        Properties props = new Properties();
         do {
+            props.clear();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             switch (++testStep) {
                 case 1:
-                    testConn = getConnectionWithProps("");
+                    testConn = getConnectionWithProps(props);
                     expectedUpdCount = expectedUpdCountDef;
                     expectedGenKeys = expectedGenKeysForChkODKU;
                     expectedGenKeysBatchStmt = expectedGenKeys;
@@ -8450,7 +8541,8 @@ public class StatementRegressionTest extends BaseTestCase {
                     expectedGenKeysBatchPStmt = expectedGenKeysForBatchPStmtChkODKU;
                     break;
                 case 2:
-                    testConn = getConnectionWithProps("dontCheckOnDuplicateKeyUpdateInSQL=true");
+                    props.setProperty(PropertyKey.dontCheckOnDuplicateKeyUpdateInSQL.getKeyName(), "true");
+                    testConn = getConnectionWithProps(props);
                     expectedUpdCount = expectedUpdCountDef;
                     expectedGenKeys = expectedGenKeysForNoChkODKU;
                     expectedGenKeysBatchStmt = expectedGenKeys;
@@ -8458,7 +8550,8 @@ public class StatementRegressionTest extends BaseTestCase {
                     expectedGenKeysBatchPStmt = expectedGenKeysForBatchPStmtNoChkODKU;
                     break;
                 case 3:
-                    testConn = getConnectionWithProps("rewriteBatchedStatements=true");
+                    props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+                    testConn = getConnectionWithProps(props);
                     expectedUpdCount = expectedUpdCountDef;
                     expectedGenKeys = expectedGenKeysForChkODKU;
                     expectedGenKeysBatchStmt = expectedGenKeysForBatchStmtRW;
@@ -8467,7 +8560,9 @@ public class StatementRegressionTest extends BaseTestCase {
                     break;
                 case 4:
                     // dontCheckOnDuplicateKeyUpdateInSQL=true is canceled by rewriteBatchedStatements=true
-                    testConn = getConnectionWithProps("rewriteBatchedStatements=true,dontCheckOnDuplicateKeyUpdateInSQL=true");
+                    props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+                    props.setProperty(PropertyKey.dontCheckOnDuplicateKeyUpdateInSQL.getKeyName(), "true");
+                    testConn = getConnectionWithProps(props);
                     expectedUpdCount = expectedUpdCountDef;
                     expectedGenKeys = expectedGenKeysForChkODKU;
                     expectedGenKeysBatchStmt = expectedGenKeysForBatchStmtRW;
@@ -8480,14 +8575,14 @@ public class StatementRegressionTest extends BaseTestCase {
             // A. Test Statement.execute() results
             createTable("testBug71672", tableDDL);
             for (int i = 0; i < queries.length; i++) {
-                testBug71672Statement(testStep, testConn, queries[i], -1, expectedGenKeys[i]);
+                checkStatementForTestBug71672(testStep, testConn, queries[i], -1, expectedGenKeys[i]);
             }
             dropTable("testBug71672");
 
             // B. Test Statement.executeUpdate() results
             createTable("testBug71672", tableDDL);
             for (int i = 0; i < queries.length; i++) {
-                testBug71672Statement(testStep, testConn, queries[i], expectedUpdCount[i], expectedGenKeys[i]);
+                checkStatementForTestBug71672(testStep, testConn, queries[i], expectedUpdCount[i], expectedGenKeys[i]);
             }
             dropTable("testBug71672");
 
@@ -8517,14 +8612,14 @@ public class StatementRegressionTest extends BaseTestCase {
             // D. Test PreparedStatement.execute() results
             createTable("testBug71672", tableDDL);
             for (int i = 0; i < queries.length; i++) {
-                testBug71672PreparedStatement(testStep, testConn, queries[i], -1, expectedGenKeys[i]);
+                checkPreparedStatementForTestBug71672(testStep, testConn, queries[i], -1, expectedGenKeys[i]);
             }
             dropTable("testBug71672");
 
             // E. Test PreparedStatement.executeUpdate() results
             createTable("testBug71672", tableDDL);
             for (int i = 0; i < queries.length; i++) {
-                testBug71672PreparedStatement(testStep, testConn, queries[i], expectedUpdCount[i], expectedGenKeys[i]);
+                checkPreparedStatementForTestBug71672(testStep, testConn, queries[i], expectedUpdCount[i], expectedGenKeys[i]);
             }
             dropTable("testBug71672");
 
@@ -8562,13 +8657,19 @@ public class StatementRegressionTest extends BaseTestCase {
             allQueries += q + ";";
         }
         do {
+            props.clear();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             switch (++testStep) {
                 case 5:
-                    testConn = getConnectionWithProps("allowMultiQueries=true");
+                    props.setProperty(PropertyKey.allowMultiQueries.getKeyName(), "true");
+                    testConn = getConnectionWithProps(props);
                     expectedGenKeysMultiQueries = new int[] { 1 };
                     break;
                 case 6:
-                    testConn = getConnectionWithProps("allowMultiQueries=true,dontCheckOnDuplicateKeyUpdateInSQL=true");
+                    props.setProperty(PropertyKey.allowMultiQueries.getKeyName(), "true");
+                    props.setProperty(PropertyKey.dontCheckOnDuplicateKeyUpdateInSQL.getKeyName(), "true");
+                    testConn = getConnectionWithProps(props);
                     expectedGenKeysMultiQueries = new int[] { 1, 2, 3 };
                     lastTest = true;
                     break;
@@ -8576,22 +8677,22 @@ public class StatementRegressionTest extends BaseTestCase {
 
             // A. Test Statement.execute() results
             createTable("testBug71672", tableDDL);
-            testBug71672Statement(testStep, testConn, allQueries, -1, expectedGenKeysMultiQueries);
+            checkStatementForTestBug71672(testStep, testConn, allQueries, -1, expectedGenKeysMultiQueries);
             dropTable("testBug71672");
 
             // B. Test Statement.executeUpdate() results
             createTable("testBug71672", tableDDL);
-            testBug71672Statement(testStep, testConn, allQueries, 3, expectedGenKeysMultiQueries);
+            checkStatementForTestBug71672(testStep, testConn, allQueries, 3, expectedGenKeysMultiQueries);
             dropTable("testBug71672");
 
             // C. Test PreparedStatement.execute() results
             createTable("testBug71672", tableDDL);
-            testBug71672PreparedStatement(testStep, testConn, allQueries, -1, expectedGenKeysMultiQueries);
+            checkPreparedStatementForTestBug71672(testStep, testConn, allQueries, -1, expectedGenKeysMultiQueries);
             dropTable("testBug71672");
 
             // D. Test PreparedStatement.executeUpdate() results
             createTable("testBug71672", tableDDL);
-            testBug71672PreparedStatement(testStep, testConn, allQueries, 3, expectedGenKeysMultiQueries);
+            checkPreparedStatementForTestBug71672(testStep, testConn, allQueries, 3, expectedGenKeysMultiQueries);
             dropTable("testBug71672");
 
             testConn.close();
@@ -8601,7 +8702,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Check the update count and returned keys for an INSERT query using a Statement object. If expectedUpdateCount < 0 then runs Statement.execute() otherwise
      * Statement.executeUpdate().
-     * 
+     *
      * @param testStep
      * @param testConn
      * @param query
@@ -8609,7 +8710,8 @@ public class StatementRegressionTest extends BaseTestCase {
      * @param expectedKeys
      * @throws SQLException
      */
-    public void testBug71672Statement(int testStep, Connection testConn, String query, int expectedUpdateCount, int[] expectedKeys) throws SQLException {
+    private void checkStatementForTestBug71672(int testStep, Connection testConn, String query, int expectedUpdateCount, int[] expectedKeys)
+            throws SQLException {
         Statement testStmt = testConn.createStatement();
 
         if (expectedUpdateCount < 0) {
@@ -8631,7 +8733,7 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Check the update count and returned keys for an INSERT query using a PreparedStatement object. If expectedUpdateCount < 0 then runs
      * PreparedStatement.execute() otherwise PreparedStatement.executeUpdate().
-     * 
+     *
      * @param testStep
      * @param testConn
      * @param query
@@ -8639,7 +8741,7 @@ public class StatementRegressionTest extends BaseTestCase {
      * @param expectedKeys
      * @throws SQLException
      */
-    public void testBug71672PreparedStatement(int testStep, Connection testConn, String query, int expectedUpdateCount, int[] expectedKeys)
+    private void checkPreparedStatementForTestBug71672(int testStep, Connection testConn, String query, int expectedUpdateCount, int[] expectedKeys)
             throws SQLException {
         PreparedStatement testPStmt = testConn.prepareStatement(query);
 
@@ -8661,7 +8763,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#71923 - Incorrect generated keys if ON DUPLICATE KEY UPDATE not exact
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -8809,9 +8911,9 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#73163 - IndexOutOfBoundsException thrown preparing statement.
-     * 
+     *
      * This bug occurs only if running with Java6+.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -8819,85 +8921,105 @@ public class StatementRegressionTest extends BaseTestCase {
         try {
             this.stmt = this.conn.prepareStatement("LOAD DATA INFILE ? INTO TABLE testBug73163");
         } catch (SQLException e) {
-            if (e.getCause() instanceof IndexOutOfBoundsException) {
-                fail("IOOBE thrown in Java6+ while preparing a LOAD DATA statement with placeholders.");
-            } else {
-                throw e;
-            }
+            assertFalse(e.getCause() instanceof IndexOutOfBoundsException, "IOOBE thrown in Java6+ while preparing a LOAD DATA statement with placeholders.");
         }
     }
 
     /**
      * Tests fix for BUG#74998 - readRemainingMultiPackets not computed correctly for rows larger than 16 MB.
-     * 
+     *
      * This bug is observed only when a multipacket uses packets 127 and 128. It happens due to the transition from positive to negative values in a signed byte
      * numeric value (127 + 1 == -128).
-     * 
+     *
      * The test case forces a multipacket to use packets 127, 128 and 129, where packet 129 is 0-length, this being another boundary case.
      * Query (*1) generates the following MySQL protocol packets from the server:
      * - Packets 1 to 4 contain protocol control data and results metadata info. (*2)
      * - Packets 5 to 126 contain each row "X". (*3)
      * - Packets 127 to 129 contain row "Y..." as a multipacket (size("Y...") = 32*1024*1024-15 requires 3 packets). (*4)
      * - Packet 130 contains row "Z". (*5)
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug74998() throws Exception {
         int maxAllowedPacketAtServer = Integer.parseInt(((JdbcConnection) this.conn).getSession().getServerSession().getServerVariable("max_allowed_packet"));
         int maxAllowedPacketMinimumForTest = 32 * 1024 * 1024;
-        if (maxAllowedPacketAtServer < maxAllowedPacketMinimumForTest) {
-            fail("You need to increase max_allowed_packet to at least " + maxAllowedPacketMinimumForTest + " before running this test!");
+        boolean changeMaxAllowedPacket = maxAllowedPacketAtServer < maxAllowedPacketMinimumForTest;
+
+        if (!versionMeetsMinimum(5, 7)) {
+            this.rs = this.stmt.executeQuery("SHOW VARIABLES LIKE 'innodb_log_file_size'");
+            this.rs.next();
+            long defaultInnodbLogFileSize = this.rs.getInt(2);
+            assumeFalse(defaultInnodbLogFileSize < maxAllowedPacketMinimumForTest * 10,
+                    "This test requires innodb_log_file_size > " + maxAllowedPacketMinimumForTest * 10);
         }
 
         createTable("testBug74998", "(id INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY, data LONGBLOB)"); // (*2)
 
-        StringBuilder query = new StringBuilder("INSERT INTO testBug74998 (data) VALUES ('X')");
-        for (int i = 0; i < 121; i++) {
-            query.append(",('X')");
-        }
-        assertEquals(122, this.stmt.executeUpdate(query.toString())); // (*3)
-
-        int lengthOfRowForMultiPacket = maxAllowedPacketMinimumForTest - 15; // 32MB - 15Bytes causes an empty packet at the end of the multipacket sequence
-
-        this.stmt.executeUpdate("INSERT INTO testBug74998 (data) VALUES (REPEAT('Y', " + lengthOfRowForMultiPacket + "))"); // (*4)
-        this.stmt.executeUpdate("INSERT INTO testBug74998 (data) VALUES ('Z')"); // (*5)
-
+        Connection con1 = null;
         try {
-            this.rs = this.stmt.executeQuery("SELECT id, data FROM testBug74998 ORDER BY id"); // (*1)
-        } catch (CJCommunicationsException | CommunicationsException e) {
-            if (e.getCause() instanceof IOException && "Packets received out of order".compareTo(e.getCause().getMessage()) == 0) {
-                fail("Failed to correctly fetch all data from communications layer due to wrong processing of muli-packet number.");
-            } else {
-                throw e;
+            if (changeMaxAllowedPacket) {
+                this.stmt.executeUpdate("SET GLOBAL max_allowed_packet=" + maxAllowedPacketMinimumForTest);
+            }
+
+            StringBuilder query = new StringBuilder("INSERT INTO testBug74998 (data) VALUES ('X')");
+            for (int i = 0; i < 121; i++) {
+                query.append(",('X')");
+            }
+
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            con1 = getConnectionWithProps(props);
+            Statement st = con1.createStatement();
+
+            assertEquals(122, st.executeUpdate(query.toString())); // (*3)
+
+            int lengthOfRowForMultiPacket = maxAllowedPacketMinimumForTest - 15; // 32MB - 15Bytes causes an empty packet at the end of the multipacket sequence
+
+            st.executeUpdate("INSERT INTO testBug74998 (data) VALUES (REPEAT('Y', " + lengthOfRowForMultiPacket + "))"); // (*4)
+            st.executeUpdate("INSERT INTO testBug74998 (data) VALUES ('Z')"); // (*5)
+
+            try {
+                this.rs = st.executeQuery("SELECT id, data FROM testBug74998 ORDER BY id"); // (*1)
+            } catch (CJCommunicationsException | CommunicationsException e) {
+                assertFalse(e.getCause() instanceof IOException && "Packets received out of order".compareTo(e.getCause().getMessage()) == 0,
+                        "Failed to correctly fetch all data from communications layer due to wrong processing of muli-packet number.");
+            }
+
+            // safety check
+            for (int i = 1; i <= 122; i++) {
+                assertTrue(this.rs.next());
+                assertEquals(i, this.rs.getInt(1));
+                assertEquals("X", this.rs.getString(2));
+            }
+            assertTrue(this.rs.next());
+            assertEquals(123, this.rs.getInt(1));
+            assertEquals("YYYYY", this.rs.getString(2).substring(0, 5));
+            assertEquals("YYYYY", this.rs.getString(2).substring(lengthOfRowForMultiPacket - 5));
+            assertTrue(this.rs.next());
+            assertEquals(124, this.rs.getInt(1));
+            assertEquals("Z", this.rs.getString(2));
+            assertFalse(this.rs.next());
+        } finally {
+            if (changeMaxAllowedPacket) {
+                this.stmt.executeUpdate("SET GLOBAL max_allowed_packet=" + maxAllowedPacketAtServer);
+            }
+            if (con1 != null) {
+                con1.close();
             }
         }
-
-        // safety check
-        for (int i = 1; i <= 122; i++) {
-            assertTrue(this.rs.next());
-            assertEquals(i, this.rs.getInt(1));
-            assertEquals("X", this.rs.getString(2));
-        }
-        assertTrue(this.rs.next());
-        assertEquals(123, this.rs.getInt(1));
-        assertEquals("YYYYY", this.rs.getString(2).substring(0, 5));
-        assertEquals("YYYYY", this.rs.getString(2).substring(lengthOfRowForMultiPacket - 5));
-        assertTrue(this.rs.next());
-        assertEquals(124, this.rs.getInt(1));
-        assertEquals("Z", this.rs.getString(2));
-        assertFalse(this.rs.next());
     }
 
     /**
      * Tests fix for BUG#50348 - mysql connector/j 5.1.10 render the wrong value for dateTime column in GMT DB.
-     * 
+     *
      * With the right time zone settings in server and client, and using the property 'useTimezone=true', time shifts are computed in the opposite direction of
      * those that are computed otherwise.
-     * 
+     *
      * This issue is observed when the server is configured with time zone 'GMT' and the client other than 'GMT'. However, if the server's time zone is one
      * equivalent to 'GMT' but under a different identifier, say "UTC" or "GMT+00", the wrong behavior isn't observed anymore.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -8905,6 +9027,9 @@ public class StatementRegressionTest extends BaseTestCase {
         final TimeZone defaultTZ = TimeZone.getDefault();
 
         final Properties testConnProps = new Properties();
+        testConnProps.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        testConnProps.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        testConnProps.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "true");
         testConnProps.setProperty(PropertyKey.cacheDefaultTimeZone.getKeyName(), "false");
         testConnProps.setProperty(PropertyKey.connectionTimeZone.getKeyName(), "SERVER");
         testConnProps.setProperty(PropertyKey.preserveInstants.getKeyName(), "true");
@@ -8933,7 +9058,7 @@ public class StatementRegressionTest extends BaseTestCase {
                 testConn.close();
             }
 
-            // Cycle through a wide range of generic 'GMT+/-hh:mm' and assert the expected time shift for a specific point in time. 
+            // Cycle through a wide range of generic 'GMT+/-hh:mm' and assert the expected time shift for a specific point in time.
             for (int tzOffset = -15; tzOffset <= 15; tzOffset++) { // cover a wider range than standard
                 for (int tzSubOffset : new int[] { 0, 30 }) {
                     final StringBuilder tz = new StringBuilder("GMT");
@@ -9009,14 +9134,14 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#77449 - Add 'truncateFractionalSeconds=true|false' property (contribution).
-     * 
+     *
      * The property actually added was 'sendFractionalSeconds' and works as the opposite of the proposed one.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug77449() throws Exception {
-        assumeTrue(versionMeetsMinimum(5, 6, 4));
+        assumeTrue(versionMeetsMinimum(5, 6, 4), "MySQL 5.6.4+ is required to run this test.");
 
         Timestamp originalTs = new Timestamp(TimeUtil.getSimpleDateFormat(null, "yyyy-MM-dd HH:mm:ss.SSS", null).parse("2014-12-31 23:59:59.999").getTime());
         Timestamp roundedTs = new Timestamp(originalTs.getTime() + 1);
@@ -9045,6 +9170,8 @@ public class StatementRegressionTest extends BaseTestCase {
             String testCase = String.format("Case: %d [ useSSPS=%s | sendFracSecs=%s ]", tst, useServerPrepStmts, sendFractionalSeconds);
 
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.queryInterceptors.getKeyName(), TestBug77449QueryInterceptor.class.getName());
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useServerPrepStmts));
             props.setProperty(PropertyKey.sendFractionalSeconds.getKeyName(), Boolean.toString(sendFractionalSeconds));
@@ -9227,6 +9354,7 @@ public class StatementRegressionTest extends BaseTestCase {
     }
 
     public static class TestBug77449QueryInterceptor extends BaseQueryInterceptor {
+
         private boolean sendFracSecs = false;
 
         @Override
@@ -9244,26 +9372,24 @@ public class StatementRegressionTest extends BaseTestCase {
                     query = query.substring(query.indexOf(':') + 2);
                 }
 
-                if (query != null
-                        && ((query.startsWith("INSERT") || query.startsWith("UPDATE") || query.startsWith("CALL")) && !query.contains("no_ts_trunk"))) {
-                    if (this.sendFracSecs ^ query.contains(".999")) {
-                        fail("Wrong TIMESTAMP trunctation in query [" + query + "]");
-                    }
+                if (query != null && (query.startsWith("INSERT") || query.startsWith("UPDATE") || query.startsWith("CALL")) && !query.contains("no_ts_trunk")) {
+                    assertFalse(this.sendFracSecs ^ query.contains(".999"), "Wrong TIMESTAMP trunctation in query [" + query + "]");
                 }
             }
             return super.preProcess(sql, interceptedQuery);
         }
+
     }
 
     /**
      * Tests fix for BUG#77681 - rewrite replace sql like insert when rewriteBatchedStatements=true (contribution)
-     * 
+     *
      * When using 'rewriteBatchedStatements=true' we rewrite several batched statements into one single query by extending its VALUES clause. Although INSERT
      * REPLACE have the same syntax, this wasn't happening for REPLACE statements.
-     * 
+     *
      * This tests the number of queries actually sent to server when rewriteBatchedStatements is used and not by using a QueryInterceptor. The test is
      * repeated for server side prepared statements. Without the fix, this test fails while checking the number of expected REPLACE queries.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -9271,6 +9397,8 @@ public class StatementRegressionTest extends BaseTestCase {
         createTable("testBug77681", "(id INT, txt VARCHAR(50), PRIMARY KEY (id))");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.queryInterceptors.getKeyName(), TestBug77681QueryInterceptor.class.getName());
 
         for (int tst = 0; tst < 4; tst++) {
@@ -9332,6 +9460,7 @@ public class StatementRegressionTest extends BaseTestCase {
     }
 
     public static class TestBug77681QueryInterceptor extends BaseQueryInterceptor {
+
         private static final char[] expectedNonRWBS = new char[] { 'I', 'I', 'I', 'I', 'I', 'R', 'R', 'R', 'I', 'I', 'I', 'I', 'I', 'R', 'R', 'R', 'R', 'R' };
         private static final char[] expectedRWBS = new char[] { 'I', 'R', 'I', 'R' };
 
@@ -9357,20 +9486,19 @@ public class StatementRegressionTest extends BaseTestCase {
             }
             if (query != null && query.indexOf("testBug77681") != -1) {
                 System.out.println(this.execCounter + " --> " + query);
-                if (this.execCounter > this.expected.length) {
-                    fail("Failed to rewrite statements");
-                }
+                assertFalse(this.execCounter > this.expected.length, "Failed to rewrite statements");
                 assertEquals(this.expected[this.execCounter++], query.charAt(0), "Wrong statement at execution number " + this.execCounter);
             }
             return super.preProcess(sql, interceptedQuery);
         }
+
     }
 
     /**
      * Tests fix for Bug#21876798 - CONNECTOR/J WITH MYSQL FABRIC AND SPRING PRODUCES PROXY ERROR.
-     * 
+     *
      * Although this is a Fabric related bug we are able reproduce it using a couple of multi-host connections.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -9382,6 +9510,8 @@ public class StatementRegressionTest extends BaseTestCase {
             boolean rewriteBatchedStatements = (tst & 0x2) != 0;
 
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useServerPrepStmts));
             props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), Boolean.toString(rewriteBatchedStatements));
 
@@ -9437,19 +9567,22 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#78961 - Can't call MySQL procedure with InOut parameters in Fabric environment.
-     * 
+     *
      * Although this is a Fabric related bug we are able reproduce it using a couple of multi-host connections.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug78961() throws Exception {
         createProcedure("testBug78961", "(IN c1 FLOAT, IN c2 FLOAT, OUT h FLOAT, INOUT t FLOAT) BEGIN SET h = SQRT(c1 * c1 + c2 * c2); SET t = t + h; END;");
 
-        Connection highLevelConn = getLoadBalancedConnection(null);
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        Connection highLevelConn = getLoadBalancedConnection(props);
         assertTrue(highLevelConn.getClass().getName().startsWith("com.sun.proxy") || highLevelConn.getClass().getName().startsWith("$Proxy"));
 
-        Connection lowLevelConn = getSourceReplicaReplicationConnection(null);
+        Connection lowLevelConn = getSourceReplicaReplicationConnection(props);
         // This simulates the behavior from Fabric connections that are causing the problem.
         ((ReplicationConnection) lowLevelConn).setProxy((JdbcConnection) highLevelConn);
 
@@ -9467,13 +9600,18 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Test Bug#75956 - Inserting timestamps using a server PreparedStatement and useLegacyDatetimeCode=false
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug75956() throws Exception {
         createTable("bug75956", "(id int not null primary key auto_increment, dt1 datetime, dt2 datetime)");
-        Connection sspsConn = getConnectionWithProps("useCursorFetch=true,useLegacyDatetimeCode=false");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.useCursorFetch.getKeyName(), "true");
+        // props.setProperty("useLegacyDatetimeCode", "false");
+        Connection sspsConn = getConnectionWithProps(props);
         this.pstmt = sspsConn.prepareStatement("insert into bug75956 (dt1, dt2) values (?, ?)");
         this.pstmt.setTimestamp(1, new Timestamp(System.currentTimeMillis()));
         this.pstmt.setTimestamp(2, new Timestamp(System.currentTimeMillis()));
@@ -9495,43 +9633,45 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#71131 - Poor error message in CallableStatement.java.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug71131() throws Exception {
         createProcedure("testBug71131", "(IN r DOUBLE, OUT p DOUBLE) BEGIN SET p = 2 * r * PI(); END");
         final CallableStatement cstmt = this.conn.prepareCall("{ CALL testBug71131 (?, 5) }");
-        assertThrows(SQLException.class, "Parameter p is not registered as an output parameter", new Callable<Void>() {
-            public Void call() throws Exception {
-                cstmt.execute();
-                return null;
-            }
+        assertThrows(SQLException.class, "Parameter p is not registered as an output parameter", () -> {
+            cstmt.execute();
+            return null;
         });
         cstmt.close();
     }
 
     /**
      * Tests fix for Bug#23188498 - CLIENT HANG WHILE USING SERVERPREPSTMT WHEN PROFILESQL=TRUE AND USEIS=TRUE.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug23188498() throws Exception {
         createTable("testBug23188498", "(id INT)");
 
-        JdbcConnection testConn = (JdbcConnection) getConnectionWithProps("useServerPrepStmts=true,useInformationSchema=true,profileSQL=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
+        props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "true");
+        props.setProperty(PropertyKey.profileSQL.getKeyName(), "true");
+        JdbcConnection testConn = (JdbcConnection) getConnectionWithProps(props);
         ExecutorService executor = Executors.newSingleThreadExecutor();
 
         // Insert data:
         this.pstmt = testConn.prepareStatement("INSERT INTO testBug23188498 (id) VALUES (?)");
         this.pstmt.setInt(1, 10);
         final PreparedStatement localPStmt1 = this.pstmt;
-        Future<Void> future1 = executor.submit(new Callable<Void>() {
-            public Void call() throws Exception {
-                localPStmt1.executeUpdate();
-                return null;
-            }
+        Future<Void> future1 = executor.submit(() -> {
+            localPStmt1.executeUpdate();
+            return null;
         });
         try {
             future1.get(5, TimeUnit.SECONDS);
@@ -9546,11 +9686,7 @@ public class StatementRegressionTest extends BaseTestCase {
         this.pstmt = testConn.prepareStatement("SELECT * FROM testBug23188498 WHERE id > ?");
         this.pstmt.setInt(1, 1);
         final PreparedStatement localPStmt2 = this.pstmt;
-        Future<ResultSet> future2 = executor.submit(new Callable<ResultSet>() {
-            public ResultSet call() throws Exception {
-                return localPStmt2.executeQuery();
-            }
-        });
+        Future<ResultSet> future2 = executor.submit(() -> localPStmt2.executeQuery());
         try {
             this.rs = future2.get(5, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
@@ -9569,11 +9705,18 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#23201930 - CLIENT HANG WHEN RSLT CUNCURRENCY=CONCUR_UPDATABLE AND RSLTSET TYPE=FORWARD_ONLY.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug23201930() throws Exception {
+        assumeTrue((((MysqlConnection) this.conn).getSession().getServerSession().getCapabilities().getCapabilityFlags() & NativeServerSession.CLIENT_SSL) != 0,
+                "This test requires server with SSL support.");
+        assumeTrue(supportsTLSv1_2(((MysqlConnection) this.conn).getSession().getServerSession().getServerVersion()),
+                "This test requires server with TLSv1.2+ support.");
+        assumeTrue(supportsTestCertificates(this.stmt),
+                "This test requires the server configured with SSL certificates from ConnectorJ/src/test/config/ssl-test-certs");
+
         boolean useSSL = false;
         boolean useSPS = false;
         boolean useCursor = false;
@@ -9591,12 +9734,8 @@ public class StatementRegressionTest extends BaseTestCase {
                     + "f4 INT DEFAULT 1, f5 INT DEFAULT 1, fl LONGBLOB)");
 
             final Properties props = new Properties();
-            props.setProperty(PropertyKey.useSSL.getKeyName(), Boolean.toString(useSSL));
+            props.setProperty(PropertyKey.sslMode.getKeyName(), useSSL ? SslMode.REQUIRED.name() : SslMode.DISABLED.name());
             props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
-            if (useSSL) {
-                props.setProperty(PropertyKey.requireSSL.getKeyName(), "true");
-                props.setProperty(PropertyKey.verifyServerCertificate.getKeyName(), "false");
-            }
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
             props.setProperty(PropertyKey.useCursorFetch.getKeyName(), Boolean.toString(useCursor));
             if (useCursor) {
@@ -9607,34 +9746,32 @@ public class StatementRegressionTest extends BaseTestCase {
             final JdbcConnection testConn = (JdbcConnection) getConnectionWithProps(props);
 
             final ExecutorService executor = Executors.newSingleThreadExecutor();
-            final Future<Void> future = executor.submit(new Callable<Void>() {
-                public Void call() throws Exception {
-                    final Statement testStmt = testConn.createStatement();
-                    testStmt.execute("INSERT INTO testBug23201930 (id) VALUES (100)");
+            final Future<Void> future = executor.submit(() -> {
+                final Statement testStmt = testConn.createStatement();
+                testStmt.execute("INSERT INTO testBug23201930 (id) VALUES (100)");
 
-                    PreparedStatement testPstmt = testConn.prepareStatement("INSERT INTO testBug23201930 (id, fl) VALUES (?, ?)", ResultSet.TYPE_FORWARD_ONLY,
-                            ResultSet.CONCUR_UPDATABLE);
-                    testPstmt.setObject(1, 101, java.sql.Types.INTEGER);
-                    testPstmt.setObject(2, longData, java.sql.Types.VARCHAR);
-                    testPstmt.execute();
-                    testPstmt.setObject(1, 102, java.sql.Types.INTEGER);
-                    testPstmt.execute();
-                    testPstmt.close();
+                PreparedStatement testPstmt = testConn.prepareStatement("INSERT INTO testBug23201930 (id, fl) VALUES (?, ?)", ResultSet.TYPE_FORWARD_ONLY,
+                        ResultSet.CONCUR_UPDATABLE);
+                testPstmt.setObject(1, 101, java.sql.Types.INTEGER);
+                testPstmt.setObject(2, longData, java.sql.Types.VARCHAR);
+                testPstmt.execute();
+                testPstmt.setObject(1, 102, java.sql.Types.INTEGER);
+                testPstmt.execute();
+                testPstmt.close();
 
-                    testPstmt = testConn.prepareStatement("SELECT * FROM testBug23201930 WHERE id >= ? ORDER BY id ASC", ResultSet.TYPE_FORWARD_ONLY,
-                            ResultSet.CONCUR_UPDATABLE);
-                    testPstmt.setObject(1, 100, java.sql.Types.INTEGER);
-                    final ResultSet testRs = testPstmt.executeQuery();
-                    assertTrue(testRs.next());
-                    assertEquals(100, testRs.getInt(1));
-                    assertTrue(testRs.next());
-                    assertEquals(101, testRs.getInt(1));
-                    assertTrue(testRs.next());
-                    assertEquals(102, testRs.getInt(1));
-                    assertFalse(testRs.next());
-                    testPstmt.close();
-                    return null;
-                }
+                testPstmt = testConn.prepareStatement("SELECT * FROM testBug23201930 WHERE id >= ? ORDER BY id ASC", ResultSet.TYPE_FORWARD_ONLY,
+                        ResultSet.CONCUR_UPDATABLE);
+                testPstmt.setObject(1, 100, java.sql.Types.INTEGER);
+                final ResultSet testRs = testPstmt.executeQuery();
+                assertTrue(testRs.next());
+                assertEquals(100, testRs.getInt(1));
+                assertTrue(testRs.next());
+                assertEquals(101, testRs.getInt(1));
+                assertTrue(testRs.next());
+                assertEquals(102, testRs.getInt(1));
+                assertFalse(testRs.next());
+                testPstmt.close();
+                return null;
             });
 
             try {
@@ -9652,7 +9789,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#80615 - prepared statement leak when rewriteBatchedStatements=true and useServerPrepStmt.
-     * 
+     *
      * There are two bugs here:
      * 1. A server prepared statement leakage by not actually closing the statement on server when .close() is called in the client side. This occurs when
      * setting 'cachePrepStmts=true&useServerPrepStmts=true' and a prepared statement is set as non-poolable ('setPoolable(false)'). By itself this doesn't
@@ -9663,13 +9800,13 @@ public class StatementRegressionTest extends BaseTestCase {
      * 'rewriteBatchedStatements=true&useServerPrepStmts=true' when a query happens to be rewritten a new (server-side) prepared statement is required but the
      * fail-safe mechanism isn't implemented in this spot, so, since the leakage described above already consumed all available prepared statements on server,
      * this ends up throwing the exception.
-     * 
+     *
      * This test combines three elements:
      * 1. Call .close() on a server prepared statement. This promotes a prepared statement for caching if prepared statements cache is enabled.
      * 2. cachePrepStmts=true|false. Turns on/off the prepared statements cache.
      * 3. Call .setPoolable(true|false) on the prepared statement. This allows canceling the prepared statement caching, on a per statement basis. It has no
      * effect if the prepared statements cache if turned off for the current connection.
-     * 
+     *
      * Expected behavior:
      * - If .close() is not called on server prepared statements then they also can't be promoted for caching. This causes a server prepared statements leak in
      * all remaining combinations.
@@ -9677,7 +9814,7 @@ public class StatementRegressionTest extends BaseTestCase {
      * then the statements is immediately closed on server side too.
      * - If .close() is called on server prepared statements and the prepared statements cache is enabled (both in the connection and in the statement) then the
      * statement is cached and only effectively closed in the server side if and when removed from the cache.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -9689,7 +9826,11 @@ public class StatementRegressionTest extends BaseTestCase {
 
         try {
             // Check if it is possible to create a server prepared statement with the current max_prepared_stmt_count.
-            Connection checkConn = getConnectionWithProps("useServerPrepStmts=true");
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
+            Connection checkConn = getConnectionWithProps(props);
             PreparedStatement checkPstmt = checkConn.prepareStatement("SELECT 1");
             assertTrue(checkPstmt instanceof ServerPreparedStatement,
                     "Failed to create a server prepared statement possibly because there are too many active prepared statements on server already.");
@@ -9705,7 +9846,7 @@ public class StatementRegressionTest extends BaseTestCase {
             // Check if it is still possible to prepare new statements after setting the new max. This test requires at least prepStmtCacheSize + 2.
             // The extra two statements are:
             // 1 - The first statement that only gets cached in the end (when calling .close() on it).
-            // 2 - The statement that triggers the expelling of the oldest element of the cache to get room for itself.  
+            // 2 - The statement that triggers the expelling of the oldest element of the cache to get room for itself.
             for (int i = 1; i <= prepStmtCacheSize + 2; i++) {
                 checkPstmt = checkConn.prepareStatement("SELECT " + i);
                 assertTrue(checkPstmt instanceof ServerPreparedStatement,
@@ -9727,9 +9868,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
                 createTable("testBug80615", "(id INT)");
 
-                final Properties props = new Properties();
                 props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
-                props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
                 props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), Boolean.toString(useCache));
                 if (useCache) {
                     props.setProperty(PropertyKey.prepStmtCacheSize.getKeyName(), String.valueOf(prepStmtCacheSize));
@@ -9787,7 +9926,7 @@ public class StatementRegressionTest extends BaseTestCase {
                     if (closeStmt) {
                         testPstmt2.close();
                         if (isSPS) {
-                            if (useCache && poolable && (prepCount - 1) > prepStmtCacheSize) { // The first statement isn't cached yet.
+                            if (useCache && poolable && prepCount - 1 > prepStmtCacheSize) { // The first statement isn't cached yet.
                                 // A statement (oldest in cache) is effectively closed on server side only after local statements cache is full.
                                 expectedCloseCount++;
                             } else if (!useCache || !poolable) {
@@ -9852,7 +9991,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#81706 - NullPointerException in driver.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -9866,6 +10005,8 @@ public class StatementRegressionTest extends BaseTestCase {
                     readOnly ? "Y" : "N");
 
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
             props.setProperty(PropertyKey.cacheResultSetMetadata.getKeyName(), Boolean.toString(cacheRsMd));
             props.setProperty(PropertyKey.queryInterceptors.getKeyName(), TestBug81706QueryInterceptor.class.getName());
@@ -9911,6 +10052,7 @@ public class StatementRegressionTest extends BaseTestCase {
     }
 
     public static class TestBug81706QueryInterceptor extends BaseQueryInterceptor {
+
         public static boolean isActive = false;
         public static String testCase = "";
 
@@ -9926,11 +10068,12 @@ public class StatementRegressionTest extends BaseTestCase {
             }
             return super.preProcess(sql, interceptedQuery);
         }
+
     }
 
     /**
      * Tests fix for Bug#66430 - setCatalog on connection leaves ServerPreparedStatement cache for old catalog.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -9949,6 +10092,8 @@ public class StatementRegressionTest extends BaseTestCase {
             final String testCase = String.format("Case: [useSPS: %s, cachePS: %s ]", useSPS ? "Y" : "N", cachePS ? "Y" : "N");
 
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), Boolean.toString(cachePS));
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
 
@@ -10013,7 +10158,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#84783 - query timeout is not working(thread hang).
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -10021,17 +10166,17 @@ public class StatementRegressionTest extends BaseTestCase {
         // Test using a standard connection.
         final Statement testStmt = this.conn.createStatement();
         testStmt.setQueryTimeout(1);
-        assertThrows(SQLException.class, "Statement cancelled due to timeout or client request", new Callable<Void>() {
-            public Void call() throws Exception {
-                testStmt.executeQuery("SELECT SLEEP(3)");
-                return null;
-            }
+        assertThrows(SQLException.class, "Statement cancelled due to timeout or client request", () -> {
+            testStmt.executeQuery("SELECT SLEEP(3)");
+            return null;
         });
         testStmt.close();
 
         boolean useSPS = false;
         do {
             final Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
 
             final String testCase = String.format("Case [SPS: %s]", useSPS ? "Y" : "N");
@@ -10039,62 +10184,50 @@ public class StatementRegressionTest extends BaseTestCase {
             Connection testConn;
 
             // Test using a failover connection.
-            testConn = getUnreliableFailoverConnection(new String[] { "host1", "host2" }, null);
+            testConn = getUnreliableFailoverConnection(new String[] { "host1", "host2" }, props);
             final Statement testStmtFO = testConn.createStatement();
             testStmtFO.setQueryTimeout(1);
-            assertThrows(testCase, SQLException.class, "Statement cancelled due to timeout or client request", new Callable<Void>() {
-                public Void call() throws Exception {
-                    testStmtFO.executeQuery("SELECT SLEEP(3)");
-                    return null;
-                }
+            assertThrows(testCase, SQLException.class, "Statement cancelled due to timeout or client request", () -> {
+                testStmtFO.executeQuery("SELECT SLEEP(3)");
+                return null;
             });
             final PreparedStatement testPstmtFO = testConn.prepareStatement("SELECT SLEEP(3)");
             testPstmtFO.setQueryTimeout(1);
-            assertThrows(testCase, SQLException.class, "Statement cancelled due to timeout or client request", new Callable<Void>() {
-                public Void call() throws Exception {
-                    testPstmtFO.executeQuery();
-                    return null;
-                }
+            assertThrows(testCase, SQLException.class, "Statement cancelled due to timeout or client request", () -> {
+                testPstmtFO.executeQuery();
+                return null;
             });
             testConn.close();
 
             // Test using a load-balanced connection.
-            testConn = getUnreliableLoadBalancedConnection(new String[] { "host1", "host2" }, null);
+            testConn = getUnreliableLoadBalancedConnection(new String[] { "host1", "host2" }, props);
             final Statement testStmtLB = testConn.createStatement();
             testStmtLB.setQueryTimeout(1);
-            assertThrows(testCase, SQLException.class, "Statement cancelled due to timeout or client request", new Callable<Void>() {
-                public Void call() throws Exception {
-                    testStmtLB.executeQuery("SELECT SLEEP(3)");
-                    return null;
-                }
+            assertThrows(testCase, SQLException.class, "Statement cancelled due to timeout or client request", () -> {
+                testStmtLB.executeQuery("SELECT SLEEP(3)");
+                return null;
             });
             final PreparedStatement testPstmtLB = testConn.prepareStatement("SELECT SLEEP(3)");
             testPstmtLB.setQueryTimeout(1);
-            assertThrows(testCase, SQLException.class, "Statement cancelled due to timeout or client request", new Callable<Void>() {
-                public Void call() throws Exception {
-                    testPstmtLB.executeQuery();
-                    return null;
-                }
+            assertThrows(testCase, SQLException.class, "Statement cancelled due to timeout or client request", () -> {
+                testPstmtLB.executeQuery();
+                return null;
             });
             testConn.close();
 
             // Test using a replication connection.
-            testConn = getUnreliableReplicationConnection(new String[] { "host1", "host2" }, null);
+            testConn = getUnreliableReplicationConnection(new String[] { "host1", "host2" }, props);
             final Statement testStmtR = testConn.createStatement();
             testStmtR.setQueryTimeout(1);
-            assertThrows(testCase, SQLException.class, "Statement cancelled due to timeout or client request", new Callable<Void>() {
-                public Void call() throws Exception {
-                    testStmtR.executeQuery("SELECT SLEEP(3)");
-                    return null;
-                }
+            assertThrows(testCase, SQLException.class, "Statement cancelled due to timeout or client request", () -> {
+                testStmtR.executeQuery("SELECT SLEEP(3)");
+                return null;
             });
             final PreparedStatement testPstmtR = testConn.prepareStatement("SELECT SLEEP(3)");
             testPstmtR.setQueryTimeout(1);
-            assertThrows(testCase, SQLException.class, "Statement cancelled due to timeout or client request", new Callable<Void>() {
-                public Void call() throws Exception {
-                    testPstmtR.executeQuery();
-                    return null;
-                }
+            assertThrows(testCase, SQLException.class, "Statement cancelled due to timeout or client request", () -> {
+                testPstmtR.executeQuery();
+                return null;
             });
             testConn.close();
         } while (useSPS = !useSPS);
@@ -10102,7 +10235,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#74932 - ConnectionImp Doesn't Close Server Prepared Statement (PreparedStatement Leak).
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -10114,6 +10247,8 @@ public class StatementRegressionTest extends BaseTestCase {
         String sql2 = "SELECT * FROM testBug74932 WHERE c2 = ?";
 
         final Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.prepStmtCacheSize.getKeyName(), "10");
         props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
@@ -10179,7 +10314,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#78313 - proxies not handling Object.equals(Object) calls correctly.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -10187,7 +10322,10 @@ public class StatementRegressionTest extends BaseTestCase {
         Connection testConn;
 
         // Plain connection.
-        testConn = getConnectionWithProps("");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        testConn = getConnectionWithProps(props);
         assertFalse(testConn.getClass().getName().matches("^(?:com\\.sun\\.proxy\\.)?\\$Proxy\\d*"));
         assertTrue(testConn.equals(testConn));
         this.stmt = testConn.createStatement();
@@ -10204,7 +10342,6 @@ public class StatementRegressionTest extends BaseTestCase {
         testConn.close();
 
         // Plain connection with proxied result sets.
-        final Properties props = new Properties();
         props.setProperty(PropertyKey.queryInterceptors.getKeyName(), ResultSetScannerInterceptor.class.getName());
         props.setProperty(ResultSetScannerInterceptor.PNAME_resultSetScannerRegex, ".*");
         testConn = getConnectionWithProps(props);
@@ -10225,7 +10362,10 @@ public class StatementRegressionTest extends BaseTestCase {
         testConn.close();
 
         // Fail-over connection; all JDBC objects are proxied.
-        testConn = getFailoverConnection();
+        props.clear();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        testConn = getFailoverConnection(props);
         assertTrue(testConn.getClass().getName().matches("^(?:com\\.sun\\.proxy\\.)?\\$Proxy\\d*"));
         assertTrue(testConn.equals(testConn));
         this.stmt = testConn.createStatement();
@@ -10242,8 +10382,8 @@ public class StatementRegressionTest extends BaseTestCase {
         assertTrue(this.rs.equals(this.rs));
         testConn.close();
 
-        // Load-balanced connection; all JDBC objects are proxied. 
-        testConn = getLoadBalancedConnection();
+        // Load-balanced connection; all JDBC objects are proxied.
+        testConn = getLoadBalancedConnection(props);
         assertTrue(testConn.getClass().getName().matches("^(?:com\\.sun\\.proxy\\.)?\\$Proxy\\d*"));
         assertTrue(testConn.equals(testConn));
         this.stmt = testConn.createStatement();
@@ -10261,7 +10401,7 @@ public class StatementRegressionTest extends BaseTestCase {
         testConn.close();
 
         // Replication connection; all JDBC objects are proxied.
-        testConn = getSourceReplicaReplicationConnection();
+        testConn = getSourceReplicaReplicationConnection(props);
         assertTrue(testConn.getClass().getName().matches("^(?:com\\.sun\\.proxy\\.)?\\$Proxy\\d*"));
         assertTrue(testConn.equals(testConn));
         this.stmt = testConn.createStatement();
@@ -10281,6 +10421,8 @@ public class StatementRegressionTest extends BaseTestCase {
         // XA Connection; unwrapped connections and statements are proxied.
         MysqlXADataSource xaDs = new MysqlXADataSource();
         xaDs.setUrl(BaseTestCase.dbUrl);
+        xaDs.<SslMode>getEnumProperty(PropertyKey.sslMode).setValue(SslMode.DISABLED);
+        xaDs.getBooleanProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName()).setValue(true);
         XAConnection xaTestConn = xaDs.getXAConnection();
         testConn = xaTestConn.getConnection();
         Connection unwrappedTestConn = testConn.unwrap(JdbcConnection.class);
@@ -10300,10 +10442,10 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#87429 - repeated close of ServerPreparedStatement causes memory leak.
-     * 
+     *
      * Original de-cache on double close() behavior modified by:
      * WL#11101 - Remove de-cache and close of SSPSs on double call to close().
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -10327,6 +10469,8 @@ public class StatementRegressionTest extends BaseTestCase {
         boolean cachePS = false;
         do {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
             props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), Boolean.toString(cachePS));
             props.setProperty(PropertyKey.prepStmtCacheSize.getKeyName(), "5");
@@ -10353,9 +10497,7 @@ public class StatementRegressionTest extends BaseTestCase {
                 try {
                     this.pstmt.setPoolable(false); // De-caches the statement or no-op if not cached.
                 } catch (SQLException e) {
-                    if (cachedSPS) {
-                        fail("Exception [" + e.getMessage() + "] not expected.");
-                    }
+                    assertFalse(cachedSPS, "Exception [" + e.getMessage() + "] not expected.");
                 }
                 this.pstmt.close(); // No-op.
                 assertEquals(0, testConn.getActiveStatementCount());
@@ -10381,10 +10523,10 @@ public class StatementRegressionTest extends BaseTestCase {
                     assertEquals(cachedSPS ? 4 : 3, testConn.getActiveStatementCount());
                     pstmt3.close();
                     pstmt3.close(); // No-op.
-                    assertEquals(cachedSPS ? (j >= 3 ? 4 : 3) : 2, testConn.getActiveStatementCount());
+                    assertEquals(cachedSPS ? j >= 3 ? 4 : 3 : 2, testConn.getActiveStatementCount());
                     pstmt2.close();
                     pstmt2.close(); // No-op.
-                    assertEquals(cachedSPS ? (j >= 2 ? 3 : 2) : 1, testConn.getActiveStatementCount());
+                    assertEquals(cachedSPS ? j >= 2 ? 3 : 2 : 1, testConn.getActiveStatementCount());
                     pstmt1.close();
                     pstmt1.close(); // No-op.
                     assertEquals(cachedSPS ? 2 : 0, testConn.getActiveStatementCount());
@@ -10404,36 +10546,28 @@ public class StatementRegressionTest extends BaseTestCase {
                     try {
                         pstmt4.setPoolable(false); // De-caches the statement or no-op if not cached.
                     } catch (SQLException e) {
-                        if (cachedSPS && j == 4) {
-                            fail("Exception [" + e.getMessage() + "] not expected.");
-                        }
+                        assertFalse(cachedSPS && j == 4, "Exception [" + e.getMessage() + "] not expected.");
                     }
                     pstmt4.close(); // No-op.
-                    assertEquals(cachedSPS ? (j < 4 ? 2 : 1) : 0, testConn.getActiveStatementCount());
+                    assertEquals(cachedSPS ? j < 4 ? 2 : 1 : 0, testConn.getActiveStatementCount());
                     try {
                         pstmt3.setPoolable(false); // De-caches the statement or no-op if not cached.
                     } catch (SQLException e) {
-                        if (cachedSPS && j == 3) {
-                            fail("Exception [" + e.getMessage() + "] not expected.");
-                        }
+                        assertFalse(cachedSPS && j == 3, "Exception [" + e.getMessage() + "] not expected.");
                     }
                     pstmt3.close(); // No-op.
-                    assertEquals(cachedSPS ? (j < 3 ? 2 : 1) : 0, testConn.getActiveStatementCount());
+                    assertEquals(cachedSPS ? j < 3 ? 2 : 1 : 0, testConn.getActiveStatementCount());
                     try {
                         pstmt2.setPoolable(false); // De-caches the statement or no-op if not cached.
                     } catch (SQLException e) {
-                        if (cachedSPS && j == 2) {
-                            fail("Exception [" + e.getMessage() + "] not expected.");
-                        }
+                        assertFalse(cachedSPS && j == 2, "Exception [" + e.getMessage() + "] not expected.");
                     }
                     pstmt2.close(); // No-op.
                     assertEquals(cachedSPS ? 1 : 0, testConn.getActiveStatementCount());
                     try {
                         pstmt1.setPoolable(false); // De-caches the statement or no-op if not cached.
                     } catch (SQLException e) {
-                        if (cachedSPS) {
-                            fail("Exception [" + e.getMessage() + "] not expected.");
-                        }
+                        assertFalse(cachedSPS, "Exception [" + e.getMessage() + "] not expected.");
                     }
                     pstmt1.close(); // No-op.
                     assertEquals(0, testConn.getActiveStatementCount());
@@ -10446,7 +10580,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#26995710 - WL#11161 : NULL POINTER EXCEPTION IN EXECUTEBATCH() AND CLOSE().
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -10456,6 +10590,8 @@ public class StatementRegressionTest extends BaseTestCase {
         boolean useSPS = false;
         do {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
             props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
             props.setProperty(PropertyKey.autoGenerateTestcaseScript.getKeyName(), "true");
@@ -10570,7 +10706,7 @@ public class StatementRegressionTest extends BaseTestCase {
                 rset = ps.executeQuery();
                 rset.next();
                 System.out.println(" Rec Cnt " + rset.getInt(1));
-                //  assertEquals(4,rs.getInt(1));   
+                //  assertEquals(4,rs.getInt(1));
 
                 rset.close();
                 ps.close();
@@ -10598,7 +10734,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#26748909, NO OPERATIONS ALLOWED AFTER STATEMENT CLOSED FOR TOSTRING()
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -10612,7 +10748,7 @@ public class StatementRegressionTest extends BaseTestCase {
         PreparedStatement ps3 = null;
 
         Properties props = new Properties();
-        props.setProperty(PropertyKey.useSSL.getKeyName(), "false");
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
         props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
 
         boolean useSPS = false;
@@ -10668,18 +10804,23 @@ public class StatementRegressionTest extends BaseTestCase {
     /**
      * Tests fix for Bug#87534 - UNION ALL query fails when useServerPrepStmts=true on database connection.
      * Base Bug#27422376 - NEWDATE TYPE IS LEAKING OUT, fixed in MySQL 5.7.22.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug87534() throws Exception {
-        assumeFalse(versionMeetsMinimum(5, 7) && !versionMeetsMinimum(5, 7, 22));
+        assumeFalse(versionMeetsMinimum(5, 7) && !versionMeetsMinimum(5, 7, 22),
+                "This test doesn't work with MySQL 5.7.0-5.7.21 because of server Bug#27422376.");
 
         System.out.println("running");
 
         boolean useSPS = false;
         do {
-            Connection testConn = getConnectionWithProps(PropertyKey.useServerPrepStmts + "=" + Boolean.toString(useSPS));
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "" + useSPS);
+            Connection testConn = getConnectionWithProps(props);
 
             this.pstmt = testConn.prepareStatement("SELECT CAST(NOW() AS DATE) UNION SELECT CAST(NOW() AS DATE)");
             this.rs = this.pstmt.executeQuery();
@@ -10716,7 +10857,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#84813 (25501750), rewriteBatchedStatements fails in INSERT.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -10730,6 +10871,8 @@ public class StatementRegressionTest extends BaseTestCase {
             final String testCase = String.format("Case [rwBS: %s, useSPS: %s]", rwBS ? "Y" : "N", useSPS ? "Y" : "N");
 
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), Boolean.toString(rwBS));
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
             props.setProperty(PropertyKey.emulateUnsupportedPstmts.getKeyName(), "false");
@@ -10777,7 +10920,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#81063 (23098159), w/ rewriteBatchedStatements, when 2 tables involved, the rewriting not correct.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -10792,6 +10935,8 @@ public class StatementRegressionTest extends BaseTestCase {
             final String testCase = String.format("Case [rwBS: %s, useSPS: %s]", rwBS ? "Y" : "N", useSPS ? "Y" : "N");
 
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.emulateUnsupportedPstmts.getKeyName(), "true");
             props.setProperty(PropertyKey.allowMultiQueries.getKeyName(), "true");
             props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), Boolean.toString(rwBS));
@@ -10855,7 +11000,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#22931700, BINDINGS.GETBOOLEAN() ALWAYS RETURNS FALSE.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -10867,6 +11012,8 @@ public class StatementRegressionTest extends BaseTestCase {
             this.stmt.executeUpdate("INSERT INTO testBug22931700 values(100,false)");
 
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
 
             Connection testConn = getConnectionWithProps(props);
@@ -10886,13 +11033,13 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#27453692, CHARACTERS GET GARBLED IN CONCAT() IN PS WHEN USECURSORFETCH=TRUE.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug27453692() throws Exception {
         Properties props = new Properties();
-        props.setProperty(PropertyKey.useSSL.getKeyName(), "false");
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
         props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.characterEncoding.getKeyName(), "utf8");
 
@@ -10919,7 +11066,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#96442 (30151808), INCORRECT DATE ERROR WHEN CALLING GETMETADATA ON PREPARED STATEMENT.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -10927,6 +11074,8 @@ public class StatementRegressionTest extends BaseTestCase {
         createTable("testBug96442", "(id INT UNSIGNED NOT NULL, rdate DATE NOT NULL, ts TIMESTAMP NOT NULL)");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         boolean useSPS = false;
         do {
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
@@ -10948,7 +11097,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#Bug#91112 (28125069), AGAIN WRONG JAVA.SQL.DATE.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -10958,10 +11107,12 @@ public class StatementRegressionTest extends BaseTestCase {
 
         TimeZone defaultTimeZone = TimeZone.getDefault();
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.put(PropertyKey.connectionTimeZone, "UTC");
         try {
-            // setting a custom calendar time zone later than the client one to detect day switch 
-            Calendar cal_Los_Angeles = GregorianCalendar.getInstance(TimeZone.getTimeZone("America/Los_Angeles"), Locale.US);
+            // setting a custom calendar time zone later than the client one to detect day switch
+            Calendar cal_Los_Angeles = Calendar.getInstance(TimeZone.getTimeZone("America/Los_Angeles"), Locale.US);
             SimpleDateFormat sdf_Los_Angeles = TimeUtil.getSimpleDateFormat("yyyy-MM-dd HH:mm:ss", cal_Los_Angeles);
 
             for (boolean useSSPS : new boolean[] { false, true }) {
@@ -10971,7 +11122,7 @@ public class StatementRegressionTest extends BaseTestCase {
                     props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "" + useSSPS);
                     props.put(PropertyKey.cacheDefaultTimeZone.getKeyName(), "" + cacheDefaultTimeZone);
 
-                    // setting a client time zone ahead of the server one to detect day switch 
+                    // setting a client time zone ahead of the server one to detect day switch
                     TimeZone.setDefault(TimeZone.getTimeZone("Europe/Moscow"));
 
                     Connection con = getConnectionWithProps(props);
@@ -11080,7 +11231,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#98536 (30877755), SIMPLEDATEFORMAT COULD CACHE A WRONG CALENDAR.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -11103,7 +11254,7 @@ public class StatementRegressionTest extends BaseTestCase {
         createTable("testBug98536", "(d1 date, pd date, d2 date)");
 
         Properties props = new Properties();
-        props.setProperty(PropertyKey.useSSL.getKeyName(), "false");
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
         props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
 
         boolean useServerPrepStmts = false;
@@ -11146,7 +11297,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#98237 (30911870), PREPAREDSTATEMENT.SETOBJECT(I, "FALSE", TYPES.BOOLEAN) ALWAYS SETS TRUE OR 1.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -11157,6 +11308,8 @@ public class StatementRegressionTest extends BaseTestCase {
         String[] trues = new String[] { "true", "y", "1", "-1", "1.0", "-1.0", "0.01", "-0.01" };
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         boolean useSPS = false;
         do {
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
@@ -11190,11 +11343,10 @@ public class StatementRegressionTest extends BaseTestCase {
                 }
 
                 ps.clearParameters();
-                assertThrows(SQLException.class, ".+ No conversion from abc to Types.BOOLEAN possible.+", new Callable<Void>() {
-                    public Void call() throws Exception {
-                        ps.setObject(1, "abc", Types.BOOLEAN);
-                        return null;
-                    }
+                assertThrows(SQLException.class, "No conversion from abc to Types.BOOLEAN possible.+", () -> {
+                    ps.setObject(1, "abc", Types.BOOLEAN);
+                    ps.execute();
+                    return null;
                 });
 
             } finally {
@@ -11205,7 +11357,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#99713 (31418928), NPE DURING COM.MYSQL.CJ.SERVERPREPAREDQUERYBINDVALUE.STOREDATE().
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -11213,6 +11365,8 @@ public class StatementRegressionTest extends BaseTestCase {
         createTable("testBug99713", "(d1 DATE)");
         Connection con = null;
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         try {
             for (boolean useSSPS : new boolean[] { false, true }) {
                 for (boolean cacheDefaultTimeZone : new boolean[] { true, false }) {
@@ -11234,7 +11388,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#101242 (32046007), CANNOT USE BYTEARRAYINPUTSTREAM AS ARGUMENTS IN PREPARED STATEMENTS ANYMORE.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -11245,6 +11399,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
         Connection con = null;
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         try {
             for (boolean useSSPS : new boolean[] { false, true }) {
                 props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "" + useSSPS);
@@ -11266,16 +11422,17 @@ public class StatementRegressionTest extends BaseTestCase {
                 con.close();
             }
         }
-
     }
 
     /**
      * Tests fix for Bug#98695 (30962953), EXECUTION OF "LOAD DATA LOCAL INFILE" COMMAND THROUGH JDBC FOR DATETIME COLUMN.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug98695() throws Exception {
+        assumeTrue(supportsLoadLocalInfile(this.stmt), "This test requires the server started with --local-infile=ON");
+
         createTable("testBug98695",
                 "(id bigint(20) NOT NULL AUTO_INCREMENT, ts timestamp NULL DEFAULT NULL, dt datetime DEFAULT NULL,date_input_str varchar(45) DEFAULT NULL, PRIMARY KEY (id)) ENGINE=InnoDB");
 
@@ -11296,6 +11453,8 @@ public class StatementRegressionTest extends BaseTestCase {
         out.close();
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.connectionTimeZone.getKeyName(), "LOCAL");
         props.setProperty(PropertyKey.allowLoadLocalInfile.getKeyName(), "true");
         Connection testConn = getConnectionWithProps(props);
@@ -11336,55 +11495,18 @@ public class StatementRegressionTest extends BaseTestCase {
             assertEquals(name, ((LocalDateTime) dt).format(TimeUtil.DATETIME_FORMATTER_NO_FRACT_NO_OFFSET));
 
         }
-
-    }
-
-    /**
-     * Tests fix for Bug#101413 (32099505), JAVA.TIME.LOCALDATETIME CANNOT BE CAST TO JAVA.SQL.TIMESTAMP.
-     * 
-     * @throws Exception
-     */
-    @Test
-    public void testBug101413() throws Exception {
-        createTable("testBug101413", "(createtime1 TIMESTAMP, createtime2 DATETIME)");
-
-        Properties props = new Properties();
-        for (boolean forceConnectionTimeZoneToSession : new boolean[] { false, true }) {
-            for (boolean preserveInstants : new boolean[] { false, true }) {
-                for (boolean useSSPS : new boolean[] { false, true }) {
-                    props.setProperty(PropertyKey.forceConnectionTimeZoneToSession.getKeyName(), "" + forceConnectionTimeZoneToSession);
-                    props.setProperty(PropertyKey.preserveInstants.getKeyName(), "" + preserveInstants);
-                    props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "" + useSSPS);
-                    props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
-
-                    Connection con = getConnectionWithProps(props);
-                    PreparedStatement ps = con.prepareStatement("insert into testBug101413(createtime1, createtime2) values(?, ?)");
-
-                    con.setAutoCommit(false);
-                    for (int i = 1; i <= 20000; i++) {
-                        ps.setObject(1, LocalDateTime.now());
-                        ps.setObject(2, LocalDateTime.now());
-                        ps.addBatch();
-                        if (i % 500 == 0) {
-                            ps.executeBatch();
-                            ps.clearBatch();
-                        }
-                    }
-                    con.commit();
-                }
-            }
-        }
     }
 
     /**
      * Tests fix for Bug#101558 (32141210), NULLPOINTEREXCEPTION WHEN EXECUTING INVALID QUERY WITH USEUSAGEADVISOR ENABLED.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug101558() throws Exception {
-
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), "true");
         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
         props.setProperty(PropertyKey.useUsageAdvisor.getKeyName(), "true");
@@ -11404,7 +11526,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Test fix for Bug#20453773, EXECUTEUPDATE() FAILS FOR SERVER SIDE STMT WHEN LOGSLOWQUERIES=TRUE.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -11415,6 +11537,8 @@ public class StatementRegressionTest extends BaseTestCase {
         Connection con = null;
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
             props.setProperty(PropertyKey.useNanosForElapsedTime.getKeyName(), "true");
             props.setProperty(PropertyKey.logSlowQueries.getKeyName(), "true");
@@ -11439,7 +11563,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Test fix for Bug#21132376, PSTMT->CLOSE() AFTER PSTMT->EXECUTEBATCH() CALL RETURNS ERROR.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -11454,6 +11578,8 @@ public class StatementRegressionTest extends BaseTestCase {
             this.stmt.executeUpdate("set global max_allowed_packet=1024*1024");
 
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
             Connection con = getConnectionWithProps(props);
             Statement st = con.createStatement();
@@ -11478,12 +11604,7 @@ public class StatementRegressionTest extends BaseTestCase {
             ps.setInt(1, 3);
             ps.setBytes(2, blobData);
             ps.addBatch();
-
-            if (versionMeetsMinimum(8, 0, 26)) {
-                assertThrows(SQLException.class, "Packet for query is too large \\(1.048.598 > 1.048.576\\).*", () -> ps.executeBatch());
-            } else {
-                assertThrows(SQLException.class, "Packet for query is too large \\(1.048.597 > 1.048.576\\).*", () -> ps.executeBatch());
-            }
+            assertThrows(SQLException.class, "Packet for query is too large \\(1.048.6\\d\\d > 1.048.576\\).*", () -> ps.executeBatch());
             ps.close(); // was failing
 
             this.rs = st.executeQuery("select c1 from testBug21132376 ");
@@ -11498,7 +11619,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Test fix for Bug#20391550, SETSTRING() CALL AFTER CONNECTION CLOSE RESULTS IN NULLPOINTEREXCEPTION.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -11509,6 +11630,8 @@ public class StatementRegressionTest extends BaseTestCase {
         Connection con = null;
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.autoReconnect.getKeyName(), "true");
             props.setProperty(PropertyKey.enableQueryTimeouts.getKeyName(), "true");
             props.setProperty(PropertyKey.queryTimeoutKillsConnection.getKeyName(), "true");
@@ -11518,7 +11641,7 @@ public class StatementRegressionTest extends BaseTestCase {
             st.setQueryTimeout(2);
 
             PreparedStatement ps = con.prepareStatement("update testBug20391550 set c2=? where c1=?");
-            assertThrows(SQLException.class, "Statement cancelled due to timeout or client request", () -> st.executeQuery("select sleep(3)"));
+            assertThrows(SQLException.class, "Statement cancelled due to timeout or client request", () -> st.executeQuery("select sleep(8)"));
 
             assertThrows(SQLException.class, "No operations allowed after statement closed.", () -> {
                 ps.setInt(2, 100);
@@ -11542,7 +11665,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
     /**
      * Test fix for Bug#103303 (32766143), JAVA.LANG.CLASSCASTEXCEPTION WHEN INSERTING BLOB WITH SERVER PREPARED STATEMENT.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -11551,6 +11674,8 @@ public class StatementRegressionTest extends BaseTestCase {
 
         Connection con = null;
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
 
         for (boolean rewriteBS : new boolean[] { true, false }) {
             for (boolean useSSPS : new boolean[] { true, false }) {
@@ -11562,7 +11687,7 @@ public class StatementRegressionTest extends BaseTestCase {
 
                     con = getConnectionWithProps(props);
 
-                    PreparedStatement statement = con.prepareStatement("INSERT INTO testBug103303(blob1) VALUES(?)", PreparedStatement.RETURN_GENERATED_KEYS);
+                    PreparedStatement statement = con.prepareStatement("INSERT INTO testBug103303(blob1) VALUES(?)", Statement.RETURN_GENERATED_KEYS);
                     statement.setBlob(1, new SerialBlob("test1".getBytes()));
                     statement.addBatch();
                     statement.setBlob(1, new SerialBlob("test2".getBytes()));
@@ -11584,4 +11709,1901 @@ public class StatementRegressionTest extends BaseTestCase {
             }
         }
     }
+
+    /**
+     * Tests fix for Bug#103796 (32922715), CONNECTOR/J 8 STMT SETQUERYTIMEOUT CAN NOT WORK.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug103796() throws Exception {
+        Connection con = null;
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.useCursorFetch.getKeyName(), "true");
+
+        try {
+            con = getConnectionWithProps(props);
+            Statement timeoutStmt = con.createStatement();
+            timeoutStmt.setFetchSize(10);
+            timeoutStmt.setQueryTimeout(2);
+
+            long begin = System.currentTimeMillis();
+
+            try {
+                timeoutStmt.execute("SELECT SLEEP(5)");
+                fail("Query didn't time out");
+            } catch (MySQLTimeoutException timeoutEx) {
+                long duration = System.currentTimeMillis() - begin;
+                assertTrue(duration > 1000 && duration < 3000);
+            }
+        } finally {
+            if (con != null) {
+                con.close();
+            }
+        }
+    }
+
+    /**
+     * Tests fix for Bug#103878 (32954449), CONNECTOR/J 8 : QUERY WITH 'SHOW XXX' WILL GET EXCEPTION WHEN USE CURSOR.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug103878() throws Exception {
+        createTable("testBug103878", "(`fid` bigint(20) DEFAULT NULL, `ftext` longtext COLLATE utf8mb4_unicode_ci)"
+                + " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        createView("testBug103878_view", "AS SELECT * FROM testBug103878 WHERE fid > 1");
+
+        Connection con = null;
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.useCursorFetch.getKeyName(), "true");
+        props.setProperty(PropertyKey.defaultFetchSize.getKeyName(), "100");
+        props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
+
+        try {
+            con = getConnectionWithProps(props);
+            PreparedStatement ps = con.prepareStatement("SHOW CREATE TABLE testBug103878");
+            this.rs = ps.executeQuery();
+            assertTrue(this.rs.next());
+            assertTrue(StringUtils.startsWithIgnoreCase(this.rs.getString(2), "CREATE TABLE"));
+            ps.close();
+
+            ps = con.prepareStatement("SHOW CREATE VIEW testBug103878_view");
+            this.rs = ps.executeQuery();
+            assertTrue(this.rs.next());
+            assertTrue(StringUtils.startsWithIgnoreCase(this.rs.getString(2), "CREATE"));
+            assertTrue(StringUtils.indexOfIgnoreCase(this.rs.getString(2), "testBug103878_view") >= 0);
+            ps.close();
+
+            ps = con.prepareStatement("SHOW PROCESSLIST");
+            this.rs = ps.executeQuery();
+            assertTrue(this.rs.next());
+            ps.close();
+
+            if (versionMeetsMinimum(5, 7)) {
+                createUser("'testBug103878User'@'%'", "IDENTIFIED BY 'abc'");
+
+                ps = con.prepareStatement("SHOW CREATE USER testBug103878User");
+                this.rs = ps.executeQuery();
+                assertTrue(this.rs.next());
+                assertTrue(StringUtils.startsWithIgnoreCase(this.rs.getString(1), "CREATE USER"));
+                ps.close();
+            }
+        } finally {
+            if (con != null) {
+                con.close();
+            }
+        }
+    }
+
+    /**
+     * Tests fix for Bug#23204652, CURSOR POSITIONING API'S DOESNOT CHECK THE VALIDITY OF RESULTSET.
+     *
+     * @throws Exception
+     *
+     * @see StatementsTest#testResultSetProducingQueries()
+     */
+    @Test
+    public void testBug23204652() throws Exception {
+        assertThrows(SQLException.class, "Statement\\.executeQuery\\(\\) cannot issue statements that do not produce result sets\\.", () -> {
+            this.stmt.executeQuery("DO 1 + 2");
+            return null;
+        });
+    }
+
+    /**
+     * Tests fix for Bug#71929 (18346501), Prefixing query with double comments cancels query DML validation.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug71929() throws Exception {
+        String[] queries = new String[] { "CREATE TABLE testBug71929 (id INT)", "/* comments */CREATE TABLE testBug71929 (id INT)",
+                "/* comments *//* more comments */CREATE TABLE testBug71929 (id INT)" };
+        for (String query : queries) {
+            assertThrows(SQLException.class, "Statement\\.executeQuery\\(\\) cannot issue statements that do not produce result sets\\.", () -> {
+                this.stmt.executeQuery(query);
+                return null;
+            });
+        }
+
+        queries = new String[] { "SELECT 1", "/* comments */SELECT 1", "/* comments *//* more comments */SELECT 1" };
+        for (String query : queries) {
+            assertThrows(SQLException.class,
+                    "Statement\\.executeUpdate\\(\\) or Statement\\.executeLargeUpdate\\(\\) cannot issue statements that produce result sets\\.", () -> {
+                        this.stmt.executeUpdate(query);
+                        return null;
+                    });
+        }
+    }
+
+    /**
+     * Test fix for Bug#103612 (32902019), Incorrectly identified WITH...SELECT as unsafe for read-only connections.
+     *
+     * @throws Exception
+     *
+     * @see StatementsTest#testReadOnlySafeStatements()
+     */
+    @Test
+    public void testBug103612() throws Exception {
+        assumeTrue(versionMeetsMinimum(8, 0, 1), "MySQL 8.0.1+ is required to run this test.");
+
+        createTable("testBug103612", "(id INT)");
+        String query = "WITH cte AS (SELECT * FROM testBug103612) SELECT * FROM cte";
+
+        boolean useSPS = false;
+        boolean readOnly = false;
+        do {
+            final String testCase = String.format("Case [SPS: %s, ReadOnly: %s]", useSPS ? "Y" : "N", readOnly ? "Y" : "N");
+
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+            Connection testConn = getConnectionWithProps(props);
+            testConn.setReadOnly(readOnly);
+
+            try (Statement testStmt = testConn.createStatement()) {
+                assertTrue(testStmt.execute(query), testCase);
+            }
+            try (PreparedStatement testPstmt = testConn.prepareStatement(query)) {
+                assertTrue(testPstmt.execute(), testCase);
+            }
+
+            testConn.close();
+        } while ((useSPS = !useSPS) || (readOnly = !readOnly));
+    }
+
+    /**
+     * Tests fix for Bug#101389 (32089018), GETWARNINGS SHOULD CHECK WARNING COUNT BEFORE SENDING SHOW.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug101389() throws Exception {
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.queryInterceptors.getKeyName(), Bug101389QueryInterceptor.class.getName());
+
+        boolean useSPS = false;
+        do {
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+
+            Bug101389QueryInterceptor.enabled = false; // some warnings are expected here when running against old server versions
+            java.sql.Connection testConn = getConnectionWithProps(props);
+
+            Bug101389QueryInterceptor.enabled = true;
+            Statement st = testConn.createStatement();
+            st.executeQuery("SELECT 1 FROM dual;");
+            st.getWarnings();
+
+            PreparedStatement ps = testConn.prepareStatement("SELECT 1 FROM dual;");
+            ps.execute();
+            ps.getWarnings();
+
+            testConn.close();
+        } while (useSPS = !useSPS);
+    }
+
+    public static class Bug101389QueryInterceptor extends BaseQueryInterceptor {
+
+        public static boolean enabled = false;
+
+        @Override
+        public <T extends Resultset> T preProcess(Supplier<String> sql, Query interceptedQuery) {
+            if (enabled) {
+                assertFalse(sql.get().contains("SHOW WARNINGS"), "Unexpected [SHOW WARNINGS] was issued");
+            }
+            return super.preProcess(sql, interceptedQuery);
+        }
+
+        @Override
+        public <M extends Message> M preProcess(M queryPacket) {
+            if (enabled) {
+                String sql = StringUtils.toString(queryPacket.getByteBuffer(), 1, queryPacket.getPosition() - 1);
+                assertFalse(sql.contains("SHOW WARNINGS"), "Unexpected [SHOW WARNINGS] was issued");
+            }
+            return super.preProcess(queryPacket);
+        }
+
+    }
+
+    @Test
+    public void testBlobWithSJIS() throws Exception {
+        createTable("testBlobWithSJIS", "(a SERIAL, b BLOB)");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+
+        String sqlMode = getMysqlVariable("sql_mode");
+        sqlMode = removeSqlMode("ANSI_QUOTES", sqlMode);
+        sqlMode = removeSqlMode("NO_BACKSLASH_ESCAPES", sqlMode);
+        if (sqlMode.length() > 0) {
+            sqlMode += ",";
+        }
+
+        byte[] data1 = new byte[20];
+        data1[0] = -21;
+        data1[1] = '\'';
+        data1[2] = '"';
+        data1[3] = '\b';
+        data1[4] = '\n';
+        data1[5] = '\r';
+        data1[6] = '\t';
+        data1[7] = 26; // \Z ASCII 26 (Control+Z)
+        data1[8] = '\\';
+        data1[9] = '%'; // \% A % character; see note following the table
+        data1[10] = '_'; // \_ A _ character; see note following the table
+        data1[11] = 39; // \'
+
+        for (boolean useSSPS : new boolean[] { false, true }) {
+            for (String mode : new String[] { "", "ANSI_QUOTES", "NO_BACKSLASH_ESCAPES", "ANSI_QUOTES,NO_BACKSLASH_ESCAPES" }) {
+                for (String enc : new String[] { "SJIS", "UTF-8" }) {
+                    props.setProperty(PropertyKey.characterEncoding.getKeyName(), enc);
+                    props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "" + useSSPS);
+                    props.setProperty(PropertyKey.sessionVariables.getKeyName(), "sql_mode='" + sqlMode + mode + "'");
+
+                    Connection con = getConnectionWithProps(props);
+                    Statement st = con.createStatement();
+
+                    st.executeUpdate("truncate table testBlobWithSJIS");
+
+                    PreparedStatement ps1 = con.prepareStatement("INSERT INTO testBlobWithSJIS (b) VALUES(?)");
+                    Blob blob = con.createBlob();
+                    blob.setBytes(1, data1);
+                    ps1.setBlob(1, blob);
+                    ps1.executeUpdate();
+
+                    this.rs = st.executeQuery("SELECT b FROM testBlobWithSJIS");
+                    assertTrue(this.rs.next());
+                    byte[] data2 = this.rs.getBytes(1);
+                    assertTrue(Arrays.equals(data1, data2));
+                    assertFalse(this.rs.next());
+
+                    con.close();
+                }
+            }
+        }
+    }
+
+    /**
+     * Test fix for Bug#105211 (33468860), class java.time.LocalDate cannot be cast to class java.sql.Date.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug105211() throws Exception {
+        createTable("testBug105211", "(dt date)");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+
+        boolean useSPS = false;
+        do {
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+
+            Connection con = getConnectionWithProps(props);
+            this.pstmt = con.prepareStatement("insert into testBug105211(dt) values(?)");
+            con.setAutoCommit(false);
+
+            for (int i = 0; i <= 1000; i++) {
+                this.pstmt.setObject(1, LocalDate.now());
+                this.pstmt.addBatch();
+                if (i % 100 == 0) {
+                    this.pstmt.executeBatch();
+                    this.pstmt.clearBatch();
+                }
+            }
+            con.commit();
+
+            con.close();
+        } while (useSPS = !useSPS);
+    }
+
+    /**
+     * Test fix for Bug#84365 (33425867), INSERT..VALUE with VALUES function lead to a StringIndexOutOfBoundsException.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug84365() throws Exception {
+        createTable("testBug84365", "(id int(11) NOT NULL, name varchar(25) DEFAULT NULL, PRIMARY KEY (id)) ENGINE=InnoDB DEFAULT CHARSET=latin1");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+
+        for (boolean useSSPS : new boolean[] { false, true }) {
+
+            this.stmt.executeUpdate("truncate table testBug84365");
+
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "" + useSSPS);
+            Connection testConn = getConnectionWithProps(props);
+
+            PreparedStatement st = testConn.prepareStatement("insert into testBug84365(id, name) VALUES(?,?) on duplicate key update id = values(id) + 1");
+            st.setInt(1, 1);
+            st.setString(2, "Name1");
+            st.execute();
+            st.close();
+
+            st = testConn.prepareStatement("insert into testBug84365(id, name) VALUE(?,?) on duplicate key update id = values(id) + 1");
+            st.setInt(1, 2);
+            st.setString(2, "Name2");
+            st.execute();
+            st.close();
+
+            st = testConn.prepareStatement("insert into testBug84365 set id = 2 on duplicate key update id = values(id) + 1");
+            st.execute();
+
+            this.rs = testConn.createStatement().executeQuery("select * from testBug84365 order by id");
+            assertTrue(this.rs.next());
+            assertEquals(1, this.rs.getInt("id"));
+            assertEquals("Name1", this.rs.getString("name"));
+            assertTrue(this.rs.next());
+            assertEquals(3, this.rs.getInt("id"));
+            assertEquals("Name2", this.rs.getString("name"));
+            assertFalse(this.rs.next());
+        }
+    }
+
+    /**
+     * Test fix for Bug#85223 (25656020), MYSQLSQLXML SETSTRING CRASH.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug85223() throws Exception {
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+
+        String elementString = "<Person ID=\"1\"><PersonType>M</PersonType><FirstName>FName</FirstName><LastName>LName</LastName></Person>";
+        Connection con = getConnectionWithProps(props);
+        PreparedStatement pst = con.prepareStatement("SELECT ExtractValue(?,?) as val1");
+        SQLXML xml = con.createSQLXML();
+        xml.setString(elementString);
+        pst.setSQLXML(1, xml);
+        pst.setString(2, "/Person/LastName");
+        pst.execute();
+        this.rs = pst.getResultSet();
+        this.rs.next();
+        String value = this.rs.getString(1);
+        assertEquals("LName", value);
+    }
+
+    /**
+     * Test fix for Bug#96900 (30355150), STATEMENT.CANCEL()CREATE A DATABASE CONNECTION BUT DOES NOT CLOSE THE CONNECTION.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug96900() throws Exception {
+        assumeTrue(versionMeetsMinimum(5, 7), "MySQL 5.7+ is required to run this test.");
+
+        Supplier<Integer> sessionCount = () -> {
+            try {
+                this.stmt.execute("FLUSH STATUS");
+                this.rs = this.stmt.executeQuery("SHOW STATUS LIKE 'threads_connected'");
+                this.rs.next();
+                return this.rs.getInt(2);
+            } catch (SQLException e) {
+                throw new RuntimeException(e.getMessage(), e);
+            }
+        };
+
+        int initialSessionCount = sessionCount.get();
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+
+        Connection testConn = getConnectionWithProps(props);
+        Statement testStmt = testConn.createStatement();
+
+        new Thread(() -> {
+            try {
+                testStmt.executeQuery("SELECT SLEEP(600)");
+            } catch (Throwable e) {
+                e.printStackTrace();
+            }
+        }).start();
+
+        // The difference between the `initialSessionCount` and the current session count would be greater than one if connections external to this test are
+        // created in between. Chances for this to happen in a controlled or development environment are very low and can be neglected.
+        assertEquals(1, sessionCount.get() - initialSessionCount);
+
+        testStmt.cancel();
+        assertEquals(1, sessionCount.get() - initialSessionCount);
+
+        testConn.close();
+        assertEquals(0, sessionCount.get() - initialSessionCount);
+    }
+
+    /**
+     * Tests fix for Bug#99260 (31189960), statement.setQueryTimeout,creates a database connection and does not close.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug99260() throws Exception {
+        assumeTrue(versionMeetsMinimum(5, 7), "MySQL 5.7+ is required to run this test.");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+
+        Connection testConn = getConnectionWithProps(props);
+        long threadId = ((JdbcConnection) testConn).getId();
+        Supplier<Integer> sessionCount = () -> { // Counts sessions created since the main connection.
+            try (Statement testStmt = testConn.createStatement()) {
+                int c = 0;
+                testStmt.execute("FLUSH STATUS");
+                this.rs = testStmt.executeQuery("SHOW PROCESSLIST");
+                while (this.rs.next()) {
+                    if (this.rs.getInt(1) > threadId) {
+                        c++;
+                    }
+                }
+                return c;
+            } catch (SQLException e) {
+                throw new RuntimeException(e.getMessage(), e);
+            }
+        };
+
+        assertEquals(0, sessionCount.get());
+
+        Statement testStmt = testConn.createStatement();
+        testStmt.setQueryTimeout(1);
+        for (int i = 0; i < 5; i++) {
+            assertThrows(MySQLTimeoutException.class, "Statement cancelled due to timeout or client request", () -> {
+                testStmt.executeQuery("SELECT SLEEP(30)");
+                return null;
+            });
+            assertEquals(0, sessionCount.get());
+        }
+
+        testConn.close();
+    }
+
+    /**
+     * Tests fix for Bug#85317 (25672958), EXECUTE BATCH WILL THROW NULL POINTER EXCEPTION WHERE THE COLUMN IS BLOB!
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug85317() throws Exception {
+        createTable("testBug85317", "(k varchar(127) not null, v blob not null, primary key(k)) default charset utf8");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.useSSL.getKeyName(), "false");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+
+        byte[] ba = "abcdefg".getBytes();
+
+        boolean useSPS = false;
+        boolean rewriteBS = false;
+        do {
+            this.stmt.executeUpdate("truncate table testBug85317");
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "" + useSPS);
+            props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "" + rewriteBS);
+
+            Connection con = getConnectionWithProps(props);
+            con.setAutoCommit(false);
+            PreparedStatement ps = con.prepareStatement("replace into testBug85317(k,v) values(?,?)");
+            for (int i = 1; i < 10000; i++) {
+                ps.setString(1, String.valueOf(i));
+                ps.setBlob(2, new ByteArrayInputStream(ba));
+                ps.addBatch();
+            }
+            ps.executeBatch(); // was throwing NPE when useServerPrepStmts=false
+            ps.close();
+            con.commit();
+
+            int cnt = 0;
+            this.rs = this.stmt.executeQuery("select * from testBug85317");
+            while (this.rs.next()) {
+                cnt++;
+                assertTrue(Arrays.equals(ba, this.rs.getBytes(2)));
+            }
+            assertEquals(9999, cnt);
+
+        } while ((useSPS = !useSPS) || (rewriteBS = !rewriteBS));
+    }
+
+    /**
+     * Tests fix for Bug#104349 (33563548), com.mysql.cj NPE.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug104349() throws Exception {
+        createTable("testBug104349", "(col1 INT, col2 VARCHAR(100))");
+
+        this.stmt.executeUpdate("INSERT INTO testBug104349 VALUES (1, 'key 1')");
+        this.stmt.executeUpdate("INSERT INTO testBug104349 VALUES (2, 'key 2')");
+        this.stmt.executeUpdate("INSERT INTO testBug104349 VALUES (3, 'key 3')");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.useSSL.getKeyName(), "false");
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), "true");
+
+        boolean useSPS = false;
+        do {
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "" + useSPS);
+            Connection testConn = getConnectionWithProps(props);
+
+            PreparedStatement ps = testConn.prepareStatement("SELECT * FROM testBug104349 WHERE col1 = ?");
+            assertTrue(ps.toString().endsWith("SELECT * FROM testBug104349 WHERE col1 = ** NOT SPECIFIED **"));
+            ps.setInt(1, 1);
+            assertTrue(ps.toString().endsWith("SELECT * FROM testBug104349 WHERE col1 = 1"));
+            this.rs = ps.executeQuery();
+            assertTrue(ps.toString().endsWith("SELECT * FROM testBug104349 WHERE col1 = 1"));
+            while (this.rs.next()) {
+                assertEquals(1, this.rs.getInt(1));
+                assertEquals("key 1", this.rs.getString(2));
+            }
+            ps.close();
+            ps = testConn.prepareStatement("SELECT * FROM testBug104349 WHERE col1 = ?");
+            assertTrue(ps.toString().endsWith("SELECT * FROM testBug104349 WHERE col1 = ** NOT SPECIFIED **"));
+            ps.setInt(1, 2);
+            assertTrue(ps.toString().endsWith("SELECT * FROM testBug104349 WHERE col1 = 2"));
+            this.rs = ps.executeQuery();
+            assertTrue(ps.toString().endsWith("SELECT * FROM testBug104349 WHERE col1 = 2"));
+            while (this.rs.next()) {
+                assertEquals(2, this.rs.getInt(1));
+                assertEquals("key 2", this.rs.getString(2));
+            }
+            testConn.close();
+
+        } while (useSPS = !useSPS);
+    }
+
+    /**
+     * Tests for Bug#62006 (16714956), JAVA.IO.NOTSERIALIZABLEEXCEPTION: JAVA.IO.STRINGREADER WHEN PROFILESQL=TRUE.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug62006() throws Exception {
+        createTable("testBug62006", "(f1 longtext)");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.profileSQL.getKeyName(), "true");
+
+        boolean useSPS = false;
+        do {
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "" + useSPS);
+            Connection testConn = getConnectionWithProps(props);
+            this.pstmt = testConn.prepareStatement("insert into testBug62006 values(?)");
+            this.pstmt.setObject(1, new StringReader("test"), java.sql.Types.LONGVARCHAR, 0);
+            this.pstmt.execute();
+            this.pstmt.setObject(1, new StringReader("test"), java.sql.Types.LONGVARCHAR, 1);
+            this.pstmt.execute();
+            this.pstmt.setObject(1, new StringReader("test"));
+            this.pstmt.execute();
+            testConn.close();
+        } while (useSPS = !useSPS);
+    }
+
+    /**
+     * Tests fix for Bug#106240 (33781440), StringIndexOutOfBoundsException when VALUE is at the end of the query.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug106240() throws Exception {
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+
+        boolean useSPS = false;
+        do {
+            String testCase = String.format("Case: [ useSPS=%s ]", useSPS ? "Y" : "N");
+
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+            Connection testConn = getConnectionWithProps(props);
+
+            assertThrows(testCase, SQLException.class,
+                    "You have an error in your SQL syntax; check the manual that corresponds to your "
+                            + "MySQL server version for the right syntax to use near '' at line 1",
+                    () -> testConn.prepareStatement("INSERT INTO testBug106240 VALUES").execute());
+            assertThrows(testCase, SQLException.class,
+                    "You have an error in your SQL syntax; check the manual that corresponds to your "
+                            + "MySQL server version for the right syntax to use near '' at line 1",
+                    () -> testConn.prepareStatement("INSERT INTO testBug106240 VALUES   ").execute());
+            assertThrows(testCase, SQLException.class,
+                    "You have an error in your SQL syntax; check the manual that corresponds to your "
+                            + "MySQL server version for the right syntax to use near '' at line 1",
+                    () -> testConn.prepareStatement("INSERT INTO testBug106240 VALUES\n").execute());
+            assertThrows(testCase, SQLException.class,
+                    "You have an error in your SQL syntax; check the manual that corresponds to your "
+                            + "MySQL server version for the right syntax to use near '' at line 1",
+                    () -> testConn.prepareStatement("INSERT INTO testBug106240 VALUES/* (?, ?) */").execute());
+            assertThrows(testCase, SQLException.class,
+                    "You have an error in your SQL syntax; check the manual that corresponds to your "
+                            + "MySQL server version for the right syntax to use near '' at line 1",
+                    () -> testConn.prepareStatement("INSERT INTO testBug106240 VALUES -- (?, ?) ON DUPLICATE KEY UPDATE").execute());
+            assertThrows(testCase, SQLException.class,
+                    "You have an error in your SQL syntax; check the manual that corresponds to your "
+                            + "MySQL server version for the right syntax to use near 'AS tb106240\\(a, b\\)' at line 1",
+                    () -> testConn.prepareStatement("INSERT INTO testBug106240 VALUES/* (?, ?) */AS tb106240(a, b)").execute());
+            assertThrows(testCase, SQLException.class,
+                    "You have an error in your SQL syntax; check the manual that corresponds to your "
+                            + "MySQL server version for the right syntax to use near 'ON DUPLICATE KEY UPDATE' at line 1",
+                    () -> testConn.prepareStatement("INSERT INTO testBug106240 VALUES/* (?, ?) */ON DUPLICATE KEY UPDATE").execute());
+        } while (useSPS = !useSPS);
+    }
+
+    /**
+     * Tests for Bug#81468 (23312764), MySQL server fails to rewrite batch insert when column name contains word select.
+     * Resolved by fix for Bug#106240 (33781440), StringIndexOutOfBoundsException when VALUE is at the end of the query.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug81468() throws Exception {
+        createTable("testBug81468", "(selection INT)"); // Column has to contain "select" in its name.
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.queryInterceptors.getKeyName(), TestBug81468QueryInterceptor.class.getName());
+        props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+        props.setProperty(PropertyKey.continueBatchOnError.getKeyName(), "false");
+        props.setProperty(PropertyKey.emulateUnsupportedPstmts.getKeyName(), "true");
+
+        boolean useSPS = false;
+
+        do {
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+            Connection testConn = getConnectionWithProps(props);
+
+            // Re-writes in a single query with three values.
+            TestBug81468QueryInterceptor.resetExpectedValues(1, 1, 3);
+            PreparedStatement testPStmt = testConn.prepareStatement("INSERT INTO testBug81468 (selection) VALUES (?)");
+            testPStmt.setInt(1, 11);
+            testPStmt.addBatch();
+            testPStmt.setInt(1, 12);
+            testPStmt.addBatch();
+            testPStmt.setInt(1, 13);
+            testPStmt.addBatch();
+            assertArrayEquals(new int[] { Statement.SUCCESS_NO_INFO, Statement.SUCCESS_NO_INFO, Statement.SUCCESS_NO_INFO }, testPStmt.executeBatch());
+            testPStmt.close();
+
+            // Re-writes in a single query with five values.
+            TestBug81468QueryInterceptor.resetExpectedValues(1, 1, 5);
+            testPStmt = testConn.prepareStatement("INSERT INTO testBug81468 (selection) VALUES (?)");
+            testPStmt.setInt(1, 21);
+            testPStmt.addBatch();
+            testPStmt.setInt(1, 22);
+            testPStmt.addBatch();
+            testPStmt.setInt(1, 23);
+            testPStmt.addBatch();
+            testPStmt.setInt(1, 24);
+            testPStmt.addBatch();
+            testPStmt.setInt(1, 25);
+            testPStmt.addBatch();
+            assertArrayEquals(new int[] { Statement.SUCCESS_NO_INFO, Statement.SUCCESS_NO_INFO, Statement.SUCCESS_NO_INFO, Statement.SUCCESS_NO_INFO,
+                    Statement.SUCCESS_NO_INFO }, testPStmt.executeBatch());
+            testPStmt.close();
+
+            // Not enough queries to trigger the query re-write feature.
+            TestBug81468QueryInterceptor.resetExpectedValues(3, 1, 1);
+            Statement testStmt = testConn.createStatement();
+            testStmt.addBatch("INSERT INTO testBug81468 (selection) VALUES (31)");
+            testStmt.addBatch("INSERT INTO testBug81468 (selection) VALUES (32)");
+            testStmt.addBatch("INSERT INTO testBug81468 (selection) VALUES (33)");
+            assertArrayEquals(new int[] { 1, 1, 1 }, testStmt.executeBatch());
+            testStmt.close();
+
+            // Five or more queries triggers the query re-write feature.
+            TestBug81468QueryInterceptor.resetExpectedValues(1, 5, 5);
+            testStmt = testConn.createStatement();
+            testStmt.addBatch("INSERT INTO testBug81468 (selection) VALUES (41)");
+            testStmt.addBatch("INSERT INTO testBug81468 (selection) VALUES (42)");
+            testStmt.addBatch("INSERT INTO testBug81468 (selection) VALUES (43)");
+            testStmt.addBatch("INSERT INTO testBug81468 (selection) VALUES (44)");
+            testStmt.addBatch("INSERT INTO testBug81468 (selection) VALUES (45)");
+            assertArrayEquals(new int[] { 1, 1, 1, 1, 1 }, testStmt.executeBatch());
+            testStmt.close();
+
+            testConn.close();
+        } while (useSPS = !useSPS);
+    }
+
+    public static class TestBug81468QueryInterceptor extends BaseQueryInterceptor {
+
+        private static int expectedNumberOfExecutions = 0;
+        private static int expectedNumberOfQueries = 0;
+        private static int expectedNumberOfValues = 0;
+        private static int executionsCount = 0;
+
+        static void resetExpectedValues(int expExecs, int expQueries, int expVals) {
+            expectedNumberOfExecutions = expExecs;
+            expectedNumberOfQueries = expQueries;
+            expectedNumberOfValues = expVals;
+            executionsCount = 0;
+        }
+
+        @Override
+        public <T extends Resultset> T preProcess(Supplier<String> sql, Query interceptedQuery) {
+            String query = sql.get();
+            if (query.contains("testBug81468")) {
+                assertTrue(++executionsCount <= expectedNumberOfExecutions,
+                        "Too many statement executions. The query [" + query + "] should have been re-written");
+                assertEquals(expectedNumberOfQueries, countQueries(query), "Wrong number of queries in [" + query + "]");
+                assertEquals(expectedNumberOfValues, countValues(query));
+            }
+            return super.preProcess(sql, interceptedQuery);
+        }
+
+        private int countQueries(String query) {
+            return query.split(";").length;
+        }
+
+        private int countValues(String query) {
+            query += "/* junk */"; // Add some junk to the end of the query so that the following split allows counting the values correctly.
+            if (query.contains("?")) {
+                return query.split("\\(\\?\\)").length - 1;
+            }
+            return query.split("\\(\\d{2}\\)").length - 1;
+        }
+
+    }
+
+    /**
+     * Tests for Bug#21978230, COMMENT PARSING NOT PROPER IN PREPSTMT.EXECUTEBATCH().
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug21978230() throws Exception {
+        createTable("testBug21978230", "(c1 INT, c2 INT, t VARCHAR(100))");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+        props.setProperty(PropertyKey.continueBatchOnError.getKeyName(), "false");
+        props.setProperty(PropertyKey.emulateUnsupportedPstmts.getKeyName(), "true");
+        Connection testConn = getConnectionWithProps(props);
+
+        Consumer<String> runQueryAndAssertResults = (query) -> {
+            try {
+                this.pstmt = testConn.prepareStatement(query);
+                this.pstmt.setInt(1, 1);
+                this.pstmt.setInt(2, 10);
+                this.pstmt.setString(3, "A");
+                this.pstmt.setString(4, "A");
+                this.pstmt.addBatch();
+                this.pstmt.setInt(1, 2);
+                this.pstmt.setInt(2, 20);
+                this.pstmt.setString(3, "B");
+                this.pstmt.setString(4, "B");
+                this.pstmt.addBatch();
+                this.pstmt.setInt(1, 3);
+                this.pstmt.setInt(2, 30);
+                this.pstmt.setString(3, "C");
+                this.pstmt.setString(4, "C");
+                this.pstmt.addBatch();
+                this.pstmt.setInt(1, 4);
+                this.pstmt.setInt(2, 40);
+                this.pstmt.setString(3, "D");
+                this.pstmt.setString(4, "D");
+                this.pstmt.addBatch();
+                this.pstmt.executeBatch();
+
+                this.rs = this.stmt.executeQuery("SELECT * FROM testBug21978230");
+                for (int i = 1; i <= 4; i++) {
+                    assertTrue(this.rs.next());
+                    assertEquals(i, this.rs.getInt(1));
+                    assertEquals(i * 10, this.rs.getInt(2));
+                    char chr = (char) ('A' + i - 1);
+                    assertEquals(chr + "^^^^" + chr, this.rs.getString(3));
+                }
+                assertFalse(this.rs.next());
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
+            }
+        };
+
+        /*
+         * Expected: "Parameter index out of range".
+         */
+        this.stmt.execute("TRUNCATE TABLE testBug21978230");
+        Exception ex = assertThrows(RuntimeException.class, ".*Parameter index out of range \\(3 > number of parameters, which is 2\\)\\.", () -> {
+            runQueryAndAssertResults.accept("REPLACE INTO testBug21978230 VALUES (?, ?, /*/ CONCAT(?, '^^^^', ?)) /*ON DUPLICATE KEY UPDATE v=concat(v,?)*/");
+            return null;
+        });
+        assertEquals(ex.getCause().getClass(), SQLException.class);
+
+        this.stmt.execute("TRUNCATE TABLE testBug21978230");
+        ex = assertThrows(RuntimeException.class, ".*Parameter index out of range \\(3 > number of parameters, which is 2\\)\\.", () -> {
+            runQueryAndAssertResults.accept("INSERT INTO testBug21978230 VALUES (?, ?, /*/ CONCAT(?, '^^^^', ?)) /*ON DUPLICATE KEY UPDATE v=concat(v,?)*/");
+            return null;
+        });
+        assertEquals(ex.getCause().getClass(), SQLException.class);
+
+        /*
+         * Expected: 4 records inserted in each query
+         */
+        this.stmt.execute("TRUNCATE TABLE testBug21978230");
+        runQueryAndAssertResults.accept("REPLACE INTO testBug21978230 VALUES (?, ?, /**/ CONCAT(?, '^^^^', ?)) /*ON DUPLICATE KEY UPDATE v=concat(v,?)*/");
+
+        this.stmt.execute("TRUNCATE TABLE testBug21978230");
+        runQueryAndAssertResults.accept("INSERT INTO testBug21978230 VALUES (?, ?, /**/ CONCAT(?, '^^^^', ?)) /*ON DUPLICATE KEY UPDATE v=concat(v,?)*/");
+
+        this.stmt.execute("TRUNCATE TABLE testBug21978230");
+        runQueryAndAssertResults.accept("REPLACE INTO testBug21978230 VALUES (?, ?, concat(?, '^^^^', ?)) /*ON DUPLICATE KEY UPDaTE v=concat(v,?)*/");
+
+        this.stmt.execute("TRUNCATE TABLE testBug21978230");
+        runQueryAndAssertResults.accept("INSERT INTO testBug21978230 VALUES (?, ?, concat(?, '^^^^', ?)) /*ON DUPLICATE KEY UPDaTE v=concat(v,?)*/");
+
+        this.stmt.execute("TRUNCATE TABLE testBug21978230");
+        runQueryAndAssertResults.accept("REPLACE INTO testBug21978230 VALUES(?, ?, /* comment */CONCAT(?, '^^^^', ?))");
+
+        this.stmt.execute("TRUNCATE TABLE testBug21978230");
+        runQueryAndAssertResults.accept("INSERT INTO testBug21978230 VALUES(?, ?, /* comment */CONCAT(?, '^^^^', ?))");
+    }
+
+    /**
+     * Tests for Bug#76623 (20856749), JDBC driver misinterprets "--" as a comment, instead of "-- ".
+     *
+     * Fixed in Connector/J 8.0.27 under fix for Bug#71929 (18346501), Prefixing query with double comments cancels query DML validation.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug76623() throws Exception {
+        this.rs = this.stmt.executeQuery("SELECT 1--2");
+        assertTrue(this.rs.next());
+        assertEquals(3, this.rs.getInt(1));
+
+        this.rs = this.stmt.executeQuery("SELECT 1 --2");
+        assertTrue(this.rs.next());
+        assertEquals(3, this.rs.getInt(1));
+
+        this.rs = this.stmt.executeQuery("SELECT 1 - -2");
+        assertTrue(this.rs.next());
+        assertEquals(3, this.rs.getInt(1));
+
+        this.rs = this.stmt.executeQuery("SELECT 1-- 2");
+        assertTrue(this.rs.next());
+        assertEquals(1, this.rs.getInt(1));
+
+        this.rs = this.stmt.executeQuery("SELECT 1 -- 2");
+        assertTrue(this.rs.next());
+        assertEquals(1, this.rs.getInt(1));
+
+        boolean useSPS = false;
+        do {
+            String expectedErrMsg = useSPS ? "No parameters specified during prepareStatement\\(\\) or prepareCall\\(\\)"
+                    : "Parameter index out of range \\(1 > number of parameters, which is 0\\)\\.";
+
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+            Connection testConn = getConnectionWithProps(props);
+
+            this.pstmt = testConn.prepareStatement("SELECT 1--2 + ?");
+            this.pstmt.setInt(1, 3);
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(6, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 --2 + ?");
+            this.pstmt.setInt(1, 3);
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(6, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 - -2 + ?");
+            this.pstmt.setInt(1, 3);
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(6, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1-- 2 + ?");
+            assertThrows(SQLException.class, expectedErrMsg, () -> {
+                this.pstmt.setInt(1, 3);
+                return null;
+            });
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(1, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 -- 2 + ?");
+            assertThrows(SQLException.class, expectedErrMsg, () -> {
+                this.pstmt.setInt(1, 3);
+                return null;
+            });
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(1, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 -- 2--?");
+            assertThrows(SQLException.class, expectedErrMsg, () -> {
+                this.pstmt.setInt(1, 3);
+                return null;
+            });
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(1, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 -- 2 --?");
+            assertThrows(SQLException.class, expectedErrMsg, () -> {
+                this.pstmt.setInt(1, 3);
+                return null;
+            });
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(1, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 -- 2 - -?");
+            assertThrows(SQLException.class, expectedErrMsg, () -> {
+                this.pstmt.setInt(1, 3);
+                return null;
+            });
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(1, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 -- 2-- ?");
+            assertThrows(SQLException.class, expectedErrMsg, () -> {
+                this.pstmt.setInt(1, 3);
+                return null;
+            });
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(1, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 -- 2 -- ?");
+            assertThrows(SQLException.class, expectedErrMsg, () -> {
+                this.pstmt.setInt(1, 3);
+                return null;
+            });
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(1, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 - -2--?");
+            this.pstmt.setInt(1, 3);
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(6, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 - -2 --?");
+            this.pstmt.setInt(1, 3);
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(6, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 - -2 - -?");
+            this.pstmt.setInt(1, 3);
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(6, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 - -2-- ?");
+            assertThrows(SQLException.class, expectedErrMsg, () -> {
+                this.pstmt.setInt(1, 3);
+                return null;
+            });
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(3, this.rs.getInt(1));
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 - -2 -- ?");
+            assertThrows(SQLException.class, expectedErrMsg, () -> {
+                this.pstmt.setInt(1, 3);
+                return null;
+            });
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(3, this.rs.getInt(1));
+
+            testConn.close();
+        } while (useSPS = !useSPS);
+    }
+
+    /**
+     * Tests fix for Bug#104753 (Bug#33286177), PreparedStatement.setFetchSize(0) causes ArrayIndexOutOfBoundsException.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug104753() throws Exception {
+        createTable("testBug104753", "(id BIGINT NOT NULL, PRIMARY KEY (id))");
+
+        Consumer<Integer> runQuery = (f) -> { // fetchSize
+            try {
+                this.pstmt.setFetchSize(f);
+                this.pstmt.execute();
+                this.rs = this.pstmt.getResultSet();
+                assertTrue(this.rs.next());
+                assertEquals(1, this.rs.getInt(1));
+            } catch (Throwable e) {
+                fail("Exception not expected");
+            }
+        };
+
+        this.stmt.executeUpdate("INSERT INTO testBug104753 VALUES (1)");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
+        props.setProperty(PropertyKey.useCursorFetch.getKeyName(), "true");
+
+        // With prepared statements cache, COM_STMT_RESET sent.
+        props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), "true");
+        Connection testConn = getConnectionWithProps(props);
+
+        this.pstmt = testConn.prepareStatement("SELECT id FROM testBug104753");
+        runQuery.accept(0);
+        this.pstmt.close();
+        this.pstmt = testConn.prepareStatement("SELECT id FROM testBug104753");
+        runQuery.accept(1);
+        this.pstmt.close();
+        this.pstmt = testConn.prepareStatement("SELECT id FROM testBug104753");
+        runQuery.accept(0);
+        this.pstmt.close();
+        this.pstmt = testConn.prepareStatement("SELECT id FROM testBug104753");
+        runQuery.accept(0);
+        this.pstmt.close();
+        this.pstmt = testConn.prepareStatement("SELECT id FROM testBug104753");
+        runQuery.accept(1);
+        this.pstmt.close();
+
+        testConn.close();
+
+        // No prepared statements cache, no COM_STMT_RESET sent.
+        props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), "false");
+        testConn = getConnectionWithProps(props);
+
+        this.pstmt = testConn.prepareStatement("SELECT id FROM testBug104753");
+        runQuery.accept(0);
+        runQuery.accept(1);
+        runQuery.accept(0);
+        runQuery.accept(0);
+        runQuery.accept(1);
+
+        testConn.close();
+    }
+
+    /**
+     * Tests fix for Bug#107222 (Bug#34150112), ClientPreparedStatement.toString() no longer interpolates byte arrays.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug107222() throws Exception {
+        boolean useSPS = false;
+        boolean setMax = false;
+
+        createTable("testBug107222", "(b1 VARBINARY(100), b2 VARBINARY(100), i1 INT)");
+        do {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+            if (setMax) {
+                props.setProperty(PropertyKey.maxByteArrayAsHex.getKeyName(), "10");
+            }
+            Connection testConn = getConnectionWithProps(props);
+
+            final String testCase = String.format("Case [SPS: %s, SetMax: %s]", useSPS ? "Y" : "N", setMax ? "Y" : "N");
+            String expectedInterpolation = setMax ? "** BYTE ARRAY DATA **" : "x'4d7953514c20436f6e6e6563746f722f4a'";
+
+            this.pstmt = testConn.prepareStatement("INSERT INTO testBug107222 VALUES (?, ?, ?)");
+            this.pstmt.setBytes(1, "MySQL Connector/J".getBytes());
+            this.pstmt.setString(2, null);
+            this.pstmt.setNull(3, Types.INTEGER);
+            this.pstmt.execute();
+
+            String sql = this.pstmt.unwrap(JdbcPreparedStatement.class).toString();
+            int startPos = sql.indexOf("testBug107222");
+            assertTrue(startPos > 0, testCase);
+            int pos = sql.indexOf(expectedInterpolation, startPos);
+            assertTrue(pos > 0, testCase);
+            startPos = pos + expectedInterpolation.length();
+            pos = sql.indexOf("NULL", startPos);
+            assertTrue(pos > 0, testCase);
+            startPos = pos + "NULL".length();
+            pos = sql.indexOf("NULL", startPos);
+            assertTrue(pos > 0, testCase);
+            startPos = pos + "NULL".length();
+            assertEquals(-1, sql.indexOf("NULL", startPos), testCase);
+
+            this.pstmt = testConn.prepareStatement("SELECT ?, ?, ?");
+            this.pstmt.setString(1, null);
+            this.pstmt.setBytes(2, "MySQL Connector/J".getBytes());
+            this.pstmt.setNull(3, Types.BOOLEAN);
+            this.pstmt.executeQuery();
+
+            sql = this.pstmt.unwrap(JdbcPreparedStatement.class).toString();
+            startPos = sql.indexOf("SELECT");
+            assertTrue(startPos > 0, testCase);
+            pos = sql.indexOf("NULL", startPos);
+            assertTrue(pos > 0, testCase);
+            startPos = pos + "NULL".length();
+            pos = sql.indexOf(expectedInterpolation, startPos);
+            assertTrue(pos > 0, testCase);
+            startPos = pos + expectedInterpolation.length();
+            pos = sql.indexOf("NULL", startPos);
+            assertTrue(pos > 0, testCase);
+            startPos = pos + "NULL".length();
+            assertEquals(-1, sql.indexOf("NULL", startPos), testCase);
+        } while ((useSPS = !useSPS) && (setMax = !setMax));
+    }
+
+    /**
+     * Tests fix for Bug#108419 (Bug#34578010), Contribution: Recognize "ON DUPLICATE KEY UPDATE" in "INSERT SET" Statement.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug108419() throws Exception {
+        createTable("testBug108419", "(id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, data1 VARCHAR(255) NOT NULL, data2 VARCHAR(255))");
+
+        boolean useSPS = false;
+        boolean rwBS = false;
+        boolean noODKU = false;
+
+        do {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+            props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), Boolean.toString(rwBS));
+            props.setProperty(PropertyKey.dontCheckOnDuplicateKeyUpdateInSQL.getKeyName(), Boolean.toString(noODKU));
+            Connection testConn = getConnectionWithProps(props);
+
+            final String testCase = String.format("Case [useSPS: %s, rwBS: %s, noODKU: %s]", useSPS ? "Y" : "N", rwBS ? "Y" : "N", noODKU ? "Y" : "N");
+
+            this.pstmt = testConn.prepareStatement("INSERT INTO testBug108419 (id, data1) VALUES (?, ?)", Statement.RETURN_GENERATED_KEYS);
+            this.pstmt.setInt(1, 1);
+            this.pstmt.setString(2, "MySQL");
+            this.pstmt.execute();
+            this.rs = this.pstmt.getGeneratedKeys();
+            assertTrue(this.rs.next(), testCase);
+            assertEquals(1, this.rs.getInt(1), testCase);
+            assertFalse(this.rs.next(), testCase);
+
+            this.pstmt = testConn.prepareStatement("INSERT INTO testBug108419 (id, data1) VALUES (?, ?) ON DUPLICATE KEY UPDATE data2 = VALUES(data1)",
+                    Statement.RETURN_GENERATED_KEYS);
+            this.pstmt.setInt(1, 1);
+            this.pstmt.setString(2, "Connector/J");
+            this.pstmt.execute();
+            this.rs = this.pstmt.getGeneratedKeys();
+            assertTrue(this.rs.next(), testCase);
+            assertEquals(1, this.rs.getInt(1), testCase);
+            if (!rwBS && noODKU) { // Assume two keys were generated only when no query re-write and don't check for ODKU.
+                assertTrue(this.rs.next(), testCase);
+                assertEquals(2, this.rs.getInt(1), testCase);
+            }
+            assertFalse(this.rs.next(), testCase);
+
+            this.pstmt = testConn.prepareStatement("INSERT INTO testBug108419 SET id = ?, data1 = ? ON DUPLICATE KEY UPDATE data2 = VALUES(data1)",
+                    Statement.RETURN_GENERATED_KEYS);
+            this.pstmt.setInt(1, 1);
+            this.pstmt.setString(2, "MySQL Connector/J");
+            this.pstmt.execute();
+            this.rs = this.pstmt.getGeneratedKeys();
+            assertTrue(this.rs.next(), testCase);
+            assertEquals(1, this.rs.getInt(1), testCase);
+            if (!rwBS && noODKU) { // Assume two keys were generated only when no query re-write and don't check for ODKU.
+                assertTrue(this.rs.next(), testCase);
+                assertEquals(2, this.rs.getInt(1), testCase);
+            }
+            assertFalse(this.rs.next(), testCase);
+
+            this.stmt.execute("TRUNCATE TABLE testBug108419");
+        } while ((useSPS = !useSPS) || (rwBS = !rwBS) || (noODKU = !noODKU));
+    }
+
+    /**
+     * Tests fix for Bug#106252 (Bug#33968169), Connector/J client hangs after prepare & execute process with old version server.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug106252() throws Exception {
+        boolean useSPS = false;
+
+        do {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+            Connection testConn = getConnectionWithProps(props);
+
+            this.pstmt = testConn.prepareStatement("SELECT 1 + ? AS c1, 'MySQL' AS c2, ? AS c3");
+
+            ResultSetMetaData md = this.pstmt.getMetaData();
+            assertEquals(3, md.getColumnCount());
+            assertEquals("c1", md.getColumnName(1));
+            assertEquals("c2", md.getColumnName(2));
+            assertEquals("c3", md.getColumnName(3));
+
+            ParameterMetaData pmd = this.pstmt.getParameterMetaData();
+            assertEquals(2, pmd.getParameterCount());
+            if (useSPS) {
+                // Prior to this fix one of the following was throwing a NullPointerException.
+                // The values they return are not important for this test because different server versions return different metadata.
+                pmd.getParameterClassName(1);
+                pmd.getParameterTypeName(1);
+                pmd.getParameterClassName(2);
+                pmd.getParameterTypeName(2);
+            } else {
+                assertThrows(SQLException.class, () -> pmd.getParameterType(1));
+                assertThrows(SQLException.class, () -> pmd.getParameterType(2));
+            }
+
+            this.pstmt.setInt(1, 5);
+            this.pstmt.setString(2, "Connector/J");
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertEquals(6, this.rs.getInt(1));
+            assertEquals("MySQL", this.rs.getString(2));
+            assertEquals("Connector/J", this.rs.getString(3));
+            assertFalse(this.rs.next());
+
+            testConn.close();
+        } while (useSPS = !useSPS);
+    }
+
+    /**
+     * Tests fix for Bug#108414 (Bug#34578541), Malformed packet generation for `COM_STMT_EXECUTE`.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug108414() throws Exception {
+        boolean useSPS = false;
+        boolean bitIsBool = false;
+        boolean value = false;
+
+        do {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), PropertyDefinitions.SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+            props.setProperty(PropertyKey.transformedBitIsBoolean.getKeyName(), Boolean.toString(bitIsBool));
+
+            final String testCase = String.format("Case [SPS: %s, BitIsBool: %s, Expected: %s]", useSPS ? "Y" : "N", bitIsBool ? "Y" : "N", value ? "Y" : "N");
+
+            Connection testConn = getConnectionWithProps(props);
+            this.pstmt = testConn.prepareStatement("SELECT ?, ?, ?, ?, ?");
+
+            this.pstmt.setBoolean(1, value);
+            this.pstmt.setObject(2, value);
+            this.pstmt.setObject(3, value, MysqlType.BOOLEAN);
+            this.pstmt.setObject(4, value, MysqlType.TINYINT);
+            this.pstmt.setObject(5, value, MysqlType.BIT);
+
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+
+            assertEquals(value, this.rs.getBoolean(1), testCase);
+            assertEquals(value, this.rs.getBoolean(2), testCase);
+            assertEquals(value, this.rs.getBoolean(3), testCase);
+            assertEquals(value, this.rs.getBoolean(4), testCase);
+            assertEquals(value, this.rs.getBoolean(5), testCase);
+
+            testConn.close();
+        } while ((useSPS = !useSPS) || (bitIsBool = !bitIsBool) || (value = !value));
+    }
+
+    /**
+     * Tests fix for Bug#108195 (Bug#34512212), Connector/J rejects UNION with CTE.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug108195() throws Exception {
+        assumeTrue(versionMeetsMinimum(8, 0), "MySQL 8.0+ is required to run this test.");
+
+        this.rs = this.stmt.executeQuery("WITH cte AS (SELECT 1) (SELECT * FROM cte) UNION (SELECT 2)");
+        assertTrue(this.rs.next());
+        assertEquals(1, this.rs.getInt(1));
+        assertTrue(this.rs.next());
+        assertEquals(2, this.rs.getInt(1));
+        assertFalse(this.rs.next());
+    }
+
+    /**
+     * Tests fix for Bug#99604 (Bug#31612628), Add support to row alias on INSERT... ON DUPLICATE KEY UPDATE on batch mode.
+     * Resolved by fix for Bug#106240 (33781440), StringIndexOutOfBoundsException when VALUE is at the end of the query.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug99604() throws Exception {
+        assumeTrue(versionMeetsMinimum(8, 0, 19), "MySQL 8.0.19+ is required to run this test.");
+
+        createTable("testBug99604", "(id INT NOT NULL PRIMARY KEY, data VARCHAR(100))");
+
+        boolean useSPS = false;
+        do {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+
+            final String testCase = String.format("Case [SPS: %s]", useSPS ? "Y" : "N");
+
+            Connection testConn = getConnectionWithProps(props);
+
+            PreparedStatement testStmt = testConn.prepareStatement(
+                    "INSERT INTO testBug99604 (id, data) VALUES (?, ?) AS new ON DUPLICATE KEY UPDATE testBug99604.data = CONCAT(testBug99604.data, new.data)");
+            testStmt.setInt(1, 1);
+            testStmt.setString(2, "MySQL ");
+            testStmt.addBatch();
+            testStmt.setInt(1, 1);
+            testStmt.setString(2, "Connector/J ");
+            testStmt.addBatch();
+            testStmt.executeBatch();
+
+            this.rs = this.stmt.executeQuery("SELECT * FROM testBug99604");
+            assertTrue(this.rs.next(), testCase);
+            assertEquals(1, this.rs.getInt(1), testCase);
+            assertEquals("MySQL Connector/J ", this.rs.getString(2), testCase);
+            assertFalse(this.rs.next(), testCase);
+
+            this.stmt.execute("TRUNCATE TABLE testBug99604");
+
+            testConn.close();
+        } while (useSPS = !useSPS);
+    }
+
+    /**
+     * Tests fix for Bug#102520 (Bug#32476663), serverSideStatementCache ignores resultSetType.
+     *
+     * @throws Exception
+     */
+    @Test
+    void testBug102520() throws Exception {
+        createTable("testBug102520", "(id INT)");
+        this.stmt.executeUpdate("INSERT INTO testBug102520 VALUES (1), (2), (3), (4), (5)");
+
+        boolean useSPS = false;
+        boolean cachePS = false;
+
+        do {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), "DISABLED");
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+            props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), Boolean.toString(cachePS));
+
+            final String testCase = String.format("Case [SPS: %s, CachePS: %s]", useSPS ? "Y" : "N", cachePS ? "Y" : "N");
+
+            Connection testConn = getConnectionWithProps(props);
+
+            PreparedStatement testStmt = testConn.prepareStatement("SELECT * FROM testBug102520"); // ResultSet.TYPE_FORWARD_ONLY by default.
+            this.rs = testStmt.executeQuery();
+            assertTrue(this.rs.next(), testCase);
+            assertEquals(1, this.rs.getInt(1), testCase);
+            assertThrows(testCase, SQLException.class, "Operation not allowed for a result set of type ResultSet.TYPE_FORWARD_ONLY\\.", () -> {
+                this.rs.first();
+                return null;
+            });
+            testStmt.close();
+
+            testStmt = testConn.prepareStatement("SELECT * FROM testBug102520", ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
+            this.rs = testStmt.executeQuery();
+            assertTrue(this.rs.absolute(3), testCase);
+            assertEquals(3, this.rs.getInt(1), testCase);
+            testStmt.close();
+
+            testStmt = testConn.prepareStatement("SELECT * FROM testBug102520");
+            this.rs = testStmt.executeQuery();
+            assertTrue(this.rs.next(), testCase);
+            assertEquals(1, this.rs.getInt(1), testCase);
+            assertThrows(testCase, SQLException.class, "Operation not allowed for a result set of type ResultSet.TYPE_FORWARD_ONLY\\.", () -> {
+                assertTrue(this.rs.absolute(3), testCase);
+                return null;
+            });
+            testStmt.close();
+
+            testConn.close();
+        } while ((useSPS = !useSPS) || (cachePS = !cachePS));
+    }
+
+    /**
+     * Tests fix for Bug#109243 (Bug#34852047), Judge whether the returned result set of the sql statement is incorrect.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug109243() throws Exception {
+        assumeTrue(versionMeetsMinimum(8, 0), "MySQL 8.0+ is required to run this test.");
+
+        this.rs = this.stmt.executeQuery("WITH q1 AS (SELECT 1 v1),q2 AS (SELECT 2 v2) SELECT v1,v2 FROM q1,q2");
+        assertTrue(this.rs.next());
+        assertEquals(1, this.rs.getInt(1));
+        assertEquals(2, this.rs.getInt(2));
+        assertFalse(this.rs.next());
+    }
+
+    /**
+     * Tests fix for Bug#77368 (Bug#21321849), "LOAD DATA LOCAL INFILE" doesn't work properly with relative paths.
+     *
+     * Testing this would require changing the value of "user.dir" which could cause other tests to fail. As such, only basic testing to verify that the default
+     * relative paths work fine is done here.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug77368() throws Exception {
+        createTable("testBug77368", "(id INT, txt VARCHAR(100))");
+
+        final String data = "1\tMySQL\n2\tConnector/J";
+        final String fileName = "TestBug77368.tsv";
+
+        Files.write(Paths.get(fileName), data.getBytes());
+
+        try {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.allowLoadLocalInfile.getKeyName(), "true");
+            Connection testConn = getConnectionWithProps(props);
+            Statement testStmt = testConn.createStatement();
+            testStmt.execute("LOAD DATA LOCAL INFILE './" + fileName + "' INTO TABLE testBug77368");
+
+            this.rs = this.stmt.executeQuery("SELECT * FROM testBug77368");
+            assertTrue(this.rs.next());
+            assertEquals(1, this.rs.getInt(1));
+            assertEquals("MySQL", this.rs.getString(2));
+            assertTrue(this.rs.next());
+            assertEquals(2, this.rs.getInt(1));
+            assertEquals("Connector/J", this.rs.getString(2));
+            assertFalse(this.rs.next());
+            testConn.close();
+        } finally {
+            try {
+                Files.delete(Paths.get(fileName));
+            } catch (FileNotFoundException e) {
+            }
+        }
+    }
+
+    /**
+     * Tests fix for Bug#109864 (Bug#35034666), Connector/J 8.0.32 hangs on MySQL 5.5 with prepared statements.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug109864() throws Exception {
+        createTable("testBug109864", "(id INT)");
+
+        boolean useSPS = false;
+
+        do {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+            props.setProperty(PropertyKey.socketTimeout.getKeyName(), "5000");
+
+            Connection testConn = getConnectionWithProps(props);
+
+            this.pstmt = testConn.prepareStatement("SELECT ?");  // Both column and parameter definition blocks in Prepare response.
+            this.pstmt.setInt(1, 1);
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertFalse(this.rs.next());
+            this.pstmt.close();
+
+            this.pstmt = testConn.prepareStatement("SELECT 1");  // No parameter definition block in Stmt Prepare response.
+            this.rs = this.pstmt.executeQuery();
+            assertTrue(this.rs.next());
+            assertFalse(this.rs.next());
+
+            // Prior to this fix preparing this statement would hang indefinitely with server-prepared statements.
+            this.pstmt = testConn.prepareStatement("INSERT INTO testBug109864 VALUES (?)"); // No column definition block in Prepare response.
+            this.pstmt.setInt(1, 1);
+            assertEquals(1, this.pstmt.executeUpdate());
+            this.pstmt.close();
+
+            this.pstmt = testConn.prepareStatement("INSERT INTO testBug109864 VALUES (2)");  // No column or parameter definition blocks in Prepare response.
+            assertEquals(1, this.pstmt.executeUpdate());
+            this.pstmt.close();
+
+            testConn.close();
+        } while (useSPS = !useSPS);
+    }
+
+    /**
+     * Tests fix for Bug#109377 (Bug#34900156), rewriteBatchedStatements doesn't work when parenthesis are found in values.
+     *
+     * @throws Exception
+     */
+    @Test
+    void testBug109377() throws Exception {
+        createTable("testBug109377", "(d DOUBLE, i INT)");
+
+        boolean useSPS = false;
+        do {
+            final String testCase = String.format("Case [useSPS: %s]", useSPS ? "Y" : "N");
+
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.queryInterceptors.getKeyName(), QueryInfoQueryInterceptor.class.getName());
+            props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+
+            try (Connection testConn = getConnectionWithProps(props)) {
+                QueryInfoQueryInterceptor.startCapturing();
+                this.pstmt = testConn.prepareStatement("INSERT INTO testBug109377 (d, i) VALUES (RAND(?), ?)");
+                this.pstmt.setInt(1, 10);
+                this.pstmt.setInt(2, 1);
+                this.pstmt.addBatch();
+                this.pstmt.setInt(1, 10);
+                this.pstmt.setInt(2, 2);
+                this.pstmt.addBatch();
+                this.pstmt.executeBatch();
+                if (useSPS) {
+                    QueryInfoQueryInterceptor.assertCapturedSql(testCase, "INSERT INTO testBug109377 (d, i) VALUES (RAND(?), ?),(RAND(?), ?)");
+                } else {
+                    QueryInfoQueryInterceptor.assertCapturedSql(testCase, "INSERT INTO testBug109377 (d, i) VALUES (RAND(10), 1),(RAND(10), 2)");
+                }
+            }
+        } while (useSPS = !useSPS);
+    }
+
+    /**
+     * Tests for Bug#107577 (Bug#34325361), rewriteBatchedStatements not work when table column name contains 'value' string.
+     *
+     * Duplicate of Bug#40439 (Bug#11750096), Error rewriting batched statement if table name ends with "values", that re-surfaced while fixing Bug#109377
+     * (Bug#34900156).
+     *
+     * @throws Exception
+     */
+    @Test
+    void testBug107577() throws Exception {
+        createTable("VALUES_testBug_VALUE_107577_VALUES", "(value INT, VALUE_foo_VALUES_bar_VALUE INT)");
+
+        boolean useSPS = false;
+        do {
+            final String testCase = String.format("Case [useSPS: %s]", useSPS ? "Y" : "N");
+
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.queryInterceptors.getKeyName(), QueryInfoQueryInterceptor.class.getName());
+            props.setProperty(PropertyKey.rewriteBatchedStatements.getKeyName(), "true");
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+
+            try (Connection testConn = getConnectionWithProps(props)) {
+                QueryInfoQueryInterceptor.startCapturing();
+                this.pstmt = testConn.prepareStatement("INSERT INTO VALUES_testBug_VALUE_107577_VALUES (value, VALUE_foo_VALUES_bar_VALUE) VALUES (?, ?)");
+                this.pstmt.setInt(1, 1);
+                this.pstmt.setInt(2, 1);
+                this.pstmt.addBatch();
+                this.pstmt.setInt(1, 2);
+                this.pstmt.setInt(2, 2);
+                this.pstmt.addBatch();
+                this.pstmt.executeBatch();
+                if (useSPS) {
+                    QueryInfoQueryInterceptor.assertCapturedSql(testCase,
+                            "INSERT INTO VALUES_testBug_VALUE_107577_VALUES (value, VALUE_foo_VALUES_bar_VALUE) VALUES (?, ?),(?, ?)");
+                } else {
+                    QueryInfoQueryInterceptor.assertCapturedSql(testCase,
+                            "INSERT INTO VALUES_testBug_VALUE_107577_VALUES (value, VALUE_foo_VALUES_bar_VALUE) VALUES (1, 1),(2, 2)");
+                }
+            }
+        } while (useSPS = !useSPS);
+    }
+
+    public static class QueryInfoQueryInterceptor extends BaseQueryInterceptor {
+
+        private static boolean enabled = false;
+        private static List<String> capturedSql = new ArrayList<>();
+
+        public static void startCapturing() {
+            enabled = true;
+            capturedSql.clear();
+        }
+
+        public static void assertCapturedSql(String testCase, String... expectedSql) {
+            enabled = false;
+            assertEquals(expectedSql.length, capturedSql.size(), testCase);
+            for (int i = 0; i < expectedSql.length; i++) {
+                assertEquals(expectedSql[i], capturedSql.get(i), testCase);
+            }
+        }
+
+        @Override
+        public <T extends Resultset> T preProcess(Supplier<String> sql, Query interceptedQuery) {
+            if (enabled && interceptedQuery != null) {
+                capturedSql.add(sql.get());
+            }
+            return super.preProcess(sql, interceptedQuery);
+        }
+
+    }
+
+    /**
+     * Tests fix for Bug#34558945, PS using setCharacterStream() fails with "Incorrect string value" if the Java program encoding is not UTF-8 after 8.0.29.
+     *
+     * @throws Exception
+     */
+    @Test
+    void testBug34558945() throws Exception {
+        createTable("testBug34558945Utf8", "(txt VARCHAR(100) COLLATE utf8mb4_general_ci)");
+        createTable("testBug34558945SJis", "(txt VARCHAR(100) COLLATE sjis_japanese_ci)");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+
+        final String utf8 = "UTF-8";
+        final String sjis = "Shift_JIS";
+        final String[] charEncs = { null, utf8, sjis };
+        final String value = "\u7ADC";
+
+        for (String ce : charEncs) {
+            for (String cce : charEncs) {
+
+                if (ce == null) {
+                    props.remove(PropertyKey.characterEncoding.getKeyName());
+                } else {
+                    props.setProperty(PropertyKey.characterEncoding.getKeyName(), ce);
+                }
+                if (cce == null) {
+                    props.remove(PropertyKey.clobCharacterEncoding.getKeyName());
+                } else {
+                    props.setProperty(PropertyKey.clobCharacterEncoding.getKeyName(), cce);
+                }
+
+                boolean useSPS = false;
+                do {
+                    props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+                    try (Connection testConn = getConnectionWithProps(props)) {
+                        int records;
+                        PreparedStatement testPStmt;
+                        Statement testStmt;
+
+                        // Table with UTF-8 column.
+                        records = 1;
+                        testPStmt = testConn.prepareStatement("INSERT INTO testBug34558945Utf8 VALUES (?)");
+                        testPStmt.setString(1, value);
+                        assertEquals(1, testPStmt.executeUpdate());
+                        testPStmt.setCharacterStream(1, new StringReader(value), value.length());
+                        if (sjis.equals(cce) || cce == null && sjis.equals(ce)) {
+                            assertThrows(SQLException.class, ".*Incorrect string value:.*", testPStmt::executeUpdate);
+                        } else {
+                            assertEquals(1, testPStmt.executeUpdate());
+                            records = 2;
+                        }
+
+                        testStmt = testConn.createStatement();
+                        this.rs = testStmt.executeQuery("SELECT * FROM testBug34558945Utf8");
+                        while (records-- > 0) {
+                            assertTrue(this.rs.next());
+                            assertEquals(value, this.rs.getString(1));
+                        }
+                        assertFalse(this.rs.next());
+                        testStmt.executeUpdate("TRUNCATE TABLE testBug34558945Utf8");
+
+                        // Table with Shift_JIS column.
+                        records = 1;
+                        testPStmt = testConn.prepareStatement("INSERT INTO testBug34558945SJis VALUES (?)");
+                        testPStmt.setString(1, value);
+                        assertEquals(1, testPStmt.executeUpdate());
+                        testPStmt.setCharacterStream(1, new StringReader(value), value.length());
+                        if (sjis.equals(cce) || cce == null && sjis.equals(ce)) {
+                            assertEquals(1, testPStmt.executeUpdate());
+                            records = 2;
+                        } else {
+                            assertThrows(SQLException.class, ".*Incorrect string value:.*", testPStmt::executeUpdate);
+                        }
+
+                        testStmt = testConn.createStatement();
+                        this.rs = testStmt.executeQuery("SELECT * FROM testBug34558945SJis");
+                        while (records-- > 0) {
+                            assertTrue(this.rs.next());
+                            assertEquals(value, this.rs.getString(1));
+                        }
+                        assertFalse(this.rs.next());
+                        testStmt.executeUpdate("TRUNCATE TABLE testBug34558945SJis");
+                    }
+                } while (useSPS = !useSPS);
+            }
+        }
+    }
+
+    /**
+     * Tests fix for Bug#110321 (Bug#35167701), Issue in JDBC PreparedStatement on adding NO_BACKSLASH_ESCAPES in sql_mode.
+     *
+     * @throws Exception
+     */
+    @Test
+    void testBug110321() throws Exception {
+        String sqlMode = getMysqlVariable("sql_mode");
+        if (!sqlMode.contains("NO_BACKSLASH_ESCAPES")) {
+            if (sqlMode.length() > 0) {
+                sqlMode += ",";
+            }
+            sqlMode += "NO_BACKSLASH_ESCAPES";
+        }
+
+        String version = getMysqlVariable("version");
+        boolean useSPS = false;
+        do {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
+            props.setProperty(PropertyKey.sessionVariables.getKeyName(), "sql_mode='" + sqlMode + "'");
+
+            try (Connection testConn = getConnectionWithProps(props)) {
+                assertTrue(((JdbcConnection) testConn).getSession().getServerSession().isNoBackslashEscapesSet());
+
+                Statement testStmt = testConn.createStatement();
+                this.rs = testStmt.executeQuery("SHOW VARIABLES LIKE 'version'");
+                assertTrue(this.rs.next());
+                assertEquals(version, this.rs.getString(2));
+                assertFalse(this.rs.next());
+
+                PreparedStatement testPStmt = testConn.prepareStatement("SHOW VARIABLES LIKE ?");
+                testPStmt.setString(1, "version");
+                this.rs = testPStmt.executeQuery();
+                assertTrue(this.rs.next());
+                assertEquals(version, this.rs.getString(2));
+                assertFalse(this.rs.next());
+
+            }
+        } while (useSPS = !useSPS);
+    }
+
+    /**
+     * Tests fix for Bug#112195 (Bug#35749998), getWarnings() of StatementImpl contains all warnings.
+     *
+     * @throws Exception
+     */
+    @Test
+    void testBug112195() throws Exception {
+        String sql = "DROP TABLE IF EXISTS testBug112195";
+
+        // This creates a single warning.
+        this.stmt.execute(sql);
+
+        SQLWarning warningToLog = this.stmt.getWarnings();
+        int warningCounter = 0;
+        while (warningToLog != null) {
+            warningCounter++;
+            warningToLog = warningToLog.getNextWarning();
+        }
+        assertEquals(1, warningCounter);
+
+        // This must clear the previous warning and generate a new one.
+        this.stmt.execute(sql);
+
+        warningToLog = this.stmt.getWarnings();
+        warningCounter = 0;
+        while (warningToLog != null) {
+            warningCounter++;
+            warningToLog = warningToLog.getNextWarning();
+        }
+        assertEquals(1, warningCounter);
+    }
+
+    /**
+     * Tests fix for Bug#109546 (Bug#34958912), executeUpdate throws SQLException on queries that are only comments.
+     *
+     * @throws Exception
+     */
+    @Test
+    void testBug109546() throws Exception {
+        assertDoesNotThrow(() -> {
+            this.stmt.executeUpdate("#comment");
+        });
+        assertDoesNotThrow(() -> {
+            this.stmt.executeUpdate("-- comment");
+        });
+        assertDoesNotThrow(() -> {
+            this.stmt.executeUpdate("/* comment */");
+        });
+        assertDoesNotThrow(() -> {
+            this.stmt.executeUpdate("/* com\nment */");
+        });
+    }
+
+    /**
+     * Tests fix for Bug#112884 (Bug#36043166), Setting a large timeout leads to errors when executing SQL.
+     *
+     * @throws Exception
+     */
+    @Test
+    void testBug112884() throws Exception {
+        assertDoesNotThrow(() -> {
+            this.stmt.setQueryTimeout(Integer.MAX_VALUE / 1000 + 1);
+        });
+    }
+
+    /**
+     * Tests fix for Bug#107107 (Bug#34101635), Redundant "Reset stmt" when setting useServerPrepStmts&cachePrepStmts to true.
+     *
+     * @throws Exception
+     */
+    @Test
+    void testBug107107() throws Exception {
+        String prevGeneralLog = this.getMysqlVariable("general_log");
+        String prevLogOutput = this.getMysqlVariable("log_output");
+
+        try {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "true");
+            props.setProperty(PropertyKey.cachePrepStmts.getKeyName(), "true");
+            Connection testConn = getConnectionWithProps(props);
+
+            this.stmt.execute("SET GLOBAL general_log = 'OFF'");
+            this.stmt.execute("SET GLOBAL log_output = 'TABLE'");
+            this.stmt.execute("SET GLOBAL general_log = 'ON'");
+
+            createTable("testBug107107", "(id INT)");
+
+            PreparedStatement ps = null;
+            String sql = "INSERT INTO testBug107107 (id) VALUES (?)";
+            for (int i = 1; i <= 3; i++) {
+                ps = testConn.prepareStatement(sql);
+                ps.setInt(1, i);
+                ps.execute();
+                ps.close();
+            }
+
+            boolean foundTestTable = false;
+            this.rs = this.stmt.executeQuery("SELECT command_type, CONVERT(argument USING utf8mb4) FROM mysql.general_log ORDER BY event_time DESC LIMIT 10");
+            while (this.rs.next()) {
+                String commandType = this.rs.getString(1);
+                String argument = this.rs.getString(2);
+                if (!foundTestTable && argument.contains("testBug107107")) {
+                    foundTestTable = true;
+                }
+                assertFalse(commandType.contains("Reset stmt"), "Unexpected Reset stmt command found.");
+            }
+            assertTrue(foundTestTable, "Expected general log events were not recorded in mysql.general_log.");
+
+            testConn.close();
+        } finally {
+            this.stmt.execute("SET GLOBAL general_log = 'OFF'");
+            this.stmt.execute("SET GLOBAL log_output = '" + prevLogOutput + "'");
+            this.stmt.execute("SET GLOBAL general_log = '" + prevGeneralLog + "'");
+        }
+    }
+
 }

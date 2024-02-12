@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -30,7 +30,6 @@
 package testsuite.simple;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -48,6 +47,7 @@ import testsuite.BaseTestCase;
  * Tests for updatable result sets
  */
 public class UpdatabilityTest extends BaseTestCase {
+
     @BeforeEach
     public void setUp() throws Exception {
         createTestTable();
@@ -63,7 +63,7 @@ public class UpdatabilityTest extends BaseTestCase {
 
     /**
      * Tests if aliased tables work as updatable result sets.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -104,7 +104,7 @@ public class UpdatabilityTest extends BaseTestCase {
 
     /**
      * Tests that the driver does not let you update result sets that come from tables that don't have primary keys
-     * 
+     *
      * @throws SQLException
      */
     @Test
@@ -118,12 +118,10 @@ public class UpdatabilityTest extends BaseTestCase {
             scrollableStmt = this.conn.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_UPDATABLE);
             this.rs = scrollableStmt.executeQuery("SELECT * FROM BOGUS_UPDATABLE");
 
-            try {
+            assertThrows("ResultSet.moveToInsertRow() should not succeed on non-updatable table", NotUpdatable.class, () -> {
                 this.rs.moveToInsertRow();
-                fail("ResultSet.moveToInsertRow() should not succeed on non-updatable table");
-            } catch (NotUpdatable noUpdate) {
-                // ignore
-            }
+                return null;
+            });
         } finally {
             if (scrollableStmt != null) {
                 try {
@@ -139,7 +137,7 @@ public class UpdatabilityTest extends BaseTestCase {
 
     /**
      * Tests that the driver does not let you update result sets that come from queries that haven't selected all primary keys
-     * 
+     *
      * @throws SQLException
      */
     @Test
@@ -153,12 +151,10 @@ public class UpdatabilityTest extends BaseTestCase {
             scrollableStmt = this.conn.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_UPDATABLE);
             this.rs = scrollableStmt.executeQuery("SELECT field1 FROM MULTI_UPDATABLE");
 
-            try {
+            assertThrows("ResultSet.moveToInsertRow() should not succeed on query that does not select all primary keys", NotUpdatable.class, () -> {
                 this.rs.moveToInsertRow();
-                fail("ResultSet.moveToInsertRow() should not succeed on query that does not select all primary keys");
-            } catch (NotUpdatable noUpdate) {
-                // ignore
-            }
+                return null;
+            });
         } finally {
             if (scrollableStmt != null) {
                 try {
@@ -225,7 +221,7 @@ public class UpdatabilityTest extends BaseTestCase {
             this.rs.updateRow();
 
             int savedPrimaryKeyId = this.rs.getInt(1);
-            assertTrue((newPrimaryKeyId == savedPrimaryKeyId), "Updated primary key does not match");
+            assertTrue(newPrimaryKeyId == savedPrimaryKeyId, "Updated primary key does not match");
 
             // Check cancelRowUpdates()
             this.rs.absolute(1);
@@ -252,35 +248,35 @@ public class UpdatabilityTest extends BaseTestCase {
             int oldLastRow = this.rs.getRow();
             this.rs.deleteRow();
             this.rs.last();
-            assertTrue(this.rs.getRow() == (oldLastRow - 1), "ResultSet.deleteRow() failed");
+            assertTrue(this.rs.getRow() == oldLastRow - 1, "ResultSet.deleteRow() failed");
             this.rs.close();
 
             /*
              * FIXME: Move to regression
-             * 
+             *
              * scrollableStmt.executeUpdate("DROP TABLE IF EXISTS test");
              * scrollableStmt.executeUpdate("CREATE TABLE test (ident INTEGER
              * PRIMARY KEY, name TINYTEXT, expiry DATETIME default null)");
              * scrollableStmt.executeUpdate("INSERT INTO test SET ident=1,
              * name='original'");
-             * 
+             *
              * //Select to get a resultset to work on ResultSet this.rs =
              * this.stmt.executeQuery("SELECT ident, name, expiry FROM test");
-             * 
+             *
              * //Check that the expiry field was null before we did our update
              * this.rs.first();
-             * 
+             *
              * java.sql.Date before = this.rs.getDate("expiry");
-             * 
+             *
              * if (this.rs.wasNull()) { System.out.println("Expiry was correctly
              * SQL null before update"); }
-             * 
+             *
              * //Update a different field this.rs.updateString("name",
              * "Updated"); this.rs.updateRow();
-             * 
+             *
              * //Test to see if field has been altered java.sql.Date after =
              * this.rs.getDate(3);
-             * 
+             *
              * if (this.rs.wasNull()) System.out.println("Bug disproved - expiry
              * SQL null after update"); else System.out.println("Bug proved -
              * expiry corrupted to '" + after + "'");
@@ -310,4 +306,5 @@ public class UpdatabilityTest extends BaseTestCase {
             this.stmt.executeUpdate("INSERT INTO UPDATABLE VALUES (" + i + ", " + i + ",'StringData" + i + "')");
         }
     }
+
 }

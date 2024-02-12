@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -44,12 +44,13 @@ import com.mysql.cj.protocol.x.XMessageBuilder;
  * {@link ModifyStatement} implementation.
  */
 public class ModifyStatementImpl extends FilterableStatement<ModifyStatement, Result> implements ModifyStatement {
+
     private List<UpdateSpec> updates = new ArrayList<>();
 
     /* package private */ ModifyStatementImpl(MysqlxSession mysqlxSession, String schema, String collection, String criteria) {
         super(new DocFilterParams(schema, collection, false));
         this.mysqlxSession = mysqlxSession;
-        if (criteria == null || criteria.trim().length() == 0) {
+        if (criteria == null || criteria.trim().isEmpty()) {
             throw new XDevAPIError(Messages.getString("ModifyStatement.0", new String[] { "criteria" }));
         }
         this.filterParams.setCriteria(criteria);
@@ -95,9 +96,12 @@ public class ModifyStatementImpl extends FilterableStatement<ModifyStatement, Re
     }
 
     @Override
-    public ModifyStatement unset(String... fields) {
+    public ModifyStatement unset(String... docPath) {
         resetPrepareState();
-        this.updates.addAll(Arrays.stream(fields).map(docPath -> new UpdateSpec(UpdateType.ITEM_REMOVE, docPath)).collect(Collectors.toList()));
+        if (docPath == null) {
+            throw new XDevAPIError(Messages.getString("ModifyStatement.0", new String[] { "docPath" }));
+        }
+        this.updates.addAll(Arrays.stream(docPath).map(dp -> new UpdateSpec(UpdateType.ITEM_REMOVE, dp)).collect(Collectors.toList()));
         return this;
     }
 
@@ -110,14 +114,14 @@ public class ModifyStatementImpl extends FilterableStatement<ModifyStatement, Re
     @Override
     public ModifyStatement patch(String document) {
         resetPrepareState();
-        this.updates.add(new UpdateSpec(UpdateType.MERGE_PATCH, "").setValue(Expression.expr(document)));
+        this.updates.add(new UpdateSpec(UpdateType.MERGE_PATCH).setValue(Expression.expr(document)));
         return this;
     }
 
     @Override
-    public ModifyStatement arrayInsert(String field, Object value) {
+    public ModifyStatement arrayInsert(String docPath, Object value) {
         resetPrepareState();
-        this.updates.add(new UpdateSpec(UpdateType.ARRAY_INSERT, field).setValue(value));
+        this.updates.add(new UpdateSpec(UpdateType.ARRAY_INSERT, docPath).setValue(value));
         return this;
     }
 
@@ -136,4 +140,5 @@ public class ModifyStatementImpl extends FilterableStatement<ModifyStatement, Re
     public ModifyStatement where(String searchCondition) {
         return super.where(searchCondition);
     }
+
 }

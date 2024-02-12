@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -67,9 +67,11 @@ import org.opentest4j.AssertionFailedError;
 import com.mysql.cj.CharsetMappingWrapper;
 import com.mysql.cj.Constants;
 import com.mysql.cj.MysqlConnection;
+import com.mysql.cj.MysqlType;
 import com.mysql.cj.NativeCharsetSettings;
 import com.mysql.cj.Query;
 import com.mysql.cj.conf.PropertyDefinitions.DatabaseTerm;
+import com.mysql.cj.conf.PropertyDefinitions.SslMode;
 import com.mysql.cj.conf.PropertyKey;
 import com.mysql.cj.exceptions.MysqlErrorNumbers;
 import com.mysql.cj.jdbc.ClientPreparedStatement;
@@ -86,6 +88,7 @@ import testsuite.BaseTestCase;
  * Regression tests for DatabaseMetaData
  */
 public class MetaDataRegressionTest extends BaseTestCase {
+
     @Test
     public void testBug2607() throws Exception {
         try {
@@ -104,7 +107,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#2852, where RSMD is not returning correct (or matching) types for TINYINT and SMALLINT.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -132,7 +135,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#2855, where RSMD is not returning correct (or matching) types for FLOAT.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -157,7 +160,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#3570 -- inconsistent reporting of column type
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -199,7 +202,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests char/varchar bug
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -226,15 +229,16 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#1673, where DatabaseMetaData.getColumns() is not returning correct column ordinal info for non '%' column name patterns.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testFixForBug1673() throws Exception {
-
         createTable("testBug1673", "(field_1 INT, field_2 INT)");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         Connection con = getConnectionWithProps(props);
         try {
 
@@ -260,7 +264,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 }
             }
 
-            assertTrue((ordinalPosOfCol2Full != 0) && (ordinalPosOfCol2Scoped != 0) && (ordinalPosOfCol2Scoped == ordinalPosOfCol2Full),
+            assertTrue(ordinalPosOfCol2Full != 0 && ordinalPosOfCol2Scoped != 0 && ordinalPosOfCol2Scoped == ordinalPosOfCol2Full,
                     "Ordinal position in full column list of '" + ordinalPosOfCol2Full + "' != ordinal position in pattern search, '" + ordinalPosOfCol2Scoped
                             + "'.");
 
@@ -273,7 +277,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests bug reported by OpenOffice team with getColumns and LONGBLOB
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -305,7 +309,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#1099
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -325,7 +329,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 String typeName = this.rs.getString("TYPE_NAME");
                 //String createParams = this.rs.getString("CREATE_PARAMS");
 
-                if ((typeName.indexOf("BINARY") == -1) && !typeName.equals("LONG VARCHAR")) {
+                if (typeName.indexOf("BINARY") == -1 && !typeName.equals("LONG VARCHAR")) {
                     if (!alreadyDoneTypes.containsKey(typeName)) {
                         alreadyDoneTypes.put(typeName, null);
 
@@ -369,7 +373,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests whether or not unsigned columns are reported correctly in DBMD.getColumns
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -393,7 +397,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests whether bogus parameters break Driver.getPropertyInfo().
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -403,65 +407,55 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests whether ResultSetMetaData returns correct info for CHAR/VARCHAR columns.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testIsCaseSensitive() throws Exception {
-        try {
-            this.stmt.executeUpdate("DROP TABLE IF EXISTS testIsCaseSensitive");
-            this.stmt.executeUpdate(
-                    "CREATE TABLE testIsCaseSensitive (bin_char CHAR(1) BINARY, bin_varchar VARCHAR(64) BINARY, ci_char CHAR(1), ci_varchar VARCHAR(64))");
-            this.rs = this.stmt.executeQuery("SELECT bin_char, bin_varchar, ci_char, ci_varchar FROM testIsCaseSensitive");
+        createSchemaObject(this.stmt, "DATABASE", "testIsCaseSensitive", "DEFAULT CHARACTER SET utf8mb4");
+        createTable("testIsCaseSensitive.testIsCaseSensitive",
+                "(bin_char CHAR(1) BINARY, bin_varchar VARCHAR(64) BINARY, ci_char CHAR(1), ci_varchar VARCHAR(64))");
+        createTable("testIsCaseSensitive.testIsCaseSensitiveCs",
+                "(bin_char CHAR(1) CHARACTER SET latin1 COLLATE latin1_general_cs, bin_varchar VARCHAR(64) CHARACTER SET latin1 COLLATE latin1_general_cs,"
+                        + "ci_char CHAR(1) CHARACTER SET latin1 COLLATE latin1_general_ci,"
+                        + "ci_varchar VARCHAR(64) CHARACTER SET latin1 COLLATE latin1_general_ci, "
+                        + "bin_tinytext TINYTEXT CHARACTER SET latin1 COLLATE latin1_general_cs, bin_text TEXT CHARACTER SET latin1 COLLATE latin1_general_cs,"
+                        + "bin_med_text MEDIUMTEXT CHARACTER SET latin1 COLLATE latin1_general_cs,"
+                        + "bin_long_text LONGTEXT CHARACTER SET latin1 COLLATE latin1_general_cs,"
+                        + "ci_tinytext TINYTEXT CHARACTER SET latin1 COLLATE latin1_general_ci, ci_text TEXT CHARACTER SET latin1 COLLATE latin1_general_ci,"
+                        + "ci_med_text MEDIUMTEXT CHARACTER SET latin1 COLLATE latin1_general_ci,"
+                        + "ci_long_text LONGTEXT CHARACTER SET latin1 COLLATE latin1_general_ci)");
 
-            ResultSetMetaData rsmd = this.rs.getMetaData();
-            assertTrue(rsmd.isCaseSensitive(1));
-            assertTrue(rsmd.isCaseSensitive(2));
-            assertTrue(!rsmd.isCaseSensitive(3));
-            assertTrue(!rsmd.isCaseSensitive(4));
-        } finally {
-            this.stmt.executeUpdate("DROP TABLE IF EXISTS testIsCaseSensitive");
-        }
+        this.rs = this.stmt.executeQuery("SELECT bin_char, bin_varchar, ci_char, ci_varchar FROM testIsCaseSensitive.testIsCaseSensitive");
+        ResultSetMetaData rsmd = this.rs.getMetaData();
+        assertTrue(rsmd.isCaseSensitive(1));
+        assertTrue(rsmd.isCaseSensitive(2));
+        assertTrue(!rsmd.isCaseSensitive(3));
+        assertTrue(!rsmd.isCaseSensitive(4));
 
-        try {
-            this.stmt.executeUpdate("DROP TABLE IF EXISTS testIsCaseSensitiveCs");
-            this.stmt.executeUpdate("CREATE TABLE testIsCaseSensitiveCs (bin_char CHAR(1) CHARACTER SET latin1 COLLATE latin1_general_cs,"
-                    + "bin_varchar VARCHAR(64) CHARACTER SET latin1 COLLATE latin1_general_cs,"
-                    + "ci_char CHAR(1) CHARACTER SET latin1 COLLATE latin1_general_ci,"
-                    + "ci_varchar VARCHAR(64) CHARACTER SET latin1 COLLATE latin1_general_ci, "
-                    + "bin_tinytext TINYTEXT CHARACTER SET latin1 COLLATE latin1_general_cs, bin_text TEXT CHARACTER SET latin1 COLLATE latin1_general_cs,"
-                    + "bin_med_text MEDIUMTEXT CHARACTER SET latin1 COLLATE latin1_general_cs,"
-                    + "bin_long_text LONGTEXT CHARACTER SET latin1 COLLATE latin1_general_cs,"
-                    + "ci_tinytext TINYTEXT CHARACTER SET latin1 COLLATE latin1_general_ci, ci_text TEXT CHARACTER SET latin1 COLLATE latin1_general_ci,"
-                    + "ci_med_text MEDIUMTEXT CHARACTER SET latin1 COLLATE latin1_general_ci,"
-                    + "ci_long_text LONGTEXT CHARACTER SET latin1 COLLATE latin1_general_ci)");
+        this.rs = this.stmt.executeQuery("SELECT bin_char, bin_varchar, ci_char, ci_varchar, bin_tinytext, bin_text, bin_med_text, bin_long_text, "
+                + "ci_tinytext, ci_text, ci_med_text, ci_long_text FROM testIsCaseSensitive.testIsCaseSensitiveCs");
 
-            this.rs = this.stmt.executeQuery("SELECT bin_char, bin_varchar, ci_char, ci_varchar, bin_tinytext, bin_text, bin_med_text, bin_long_text, "
-                    + "ci_tinytext, ci_text, ci_med_text, ci_long_text FROM testIsCaseSensitiveCs");
+        rsmd = this.rs.getMetaData();
+        assertTrue(rsmd.isCaseSensitive(1));
+        assertTrue(rsmd.isCaseSensitive(2));
+        assertTrue(!rsmd.isCaseSensitive(3));
+        assertTrue(!rsmd.isCaseSensitive(4));
 
-            ResultSetMetaData rsmd = this.rs.getMetaData();
-            assertTrue(rsmd.isCaseSensitive(1));
-            assertTrue(rsmd.isCaseSensitive(2));
-            assertTrue(!rsmd.isCaseSensitive(3));
-            assertTrue(!rsmd.isCaseSensitive(4));
+        assertTrue(rsmd.isCaseSensitive(5));
+        assertTrue(rsmd.isCaseSensitive(6));
+        assertTrue(rsmd.isCaseSensitive(7));
+        assertTrue(rsmd.isCaseSensitive(8));
 
-            assertTrue(rsmd.isCaseSensitive(5));
-            assertTrue(rsmd.isCaseSensitive(6));
-            assertTrue(rsmd.isCaseSensitive(7));
-            assertTrue(rsmd.isCaseSensitive(8));
-
-            assertTrue(!rsmd.isCaseSensitive(9));
-            assertTrue(!rsmd.isCaseSensitive(10));
-            assertTrue(!rsmd.isCaseSensitive(11));
-            assertTrue(!rsmd.isCaseSensitive(12));
-        } finally {
-            this.stmt.executeUpdate("DROP TABLE IF EXISTS testIsCaseSensitiveCs");
-        }
+        assertTrue(!rsmd.isCaseSensitive(9));
+        assertTrue(!rsmd.isCaseSensitive(10));
+        assertTrue(!rsmd.isCaseSensitive(11));
+        assertTrue(!rsmd.isCaseSensitive(12));
     }
 
     /**
      * Tests whether or not DatabaseMetaData.getColumns() returns the correct java.sql.Types info.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -482,7 +476,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests for types being returned correctly
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -494,6 +488,16 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
             this.rs = this.stmt.executeQuery("SELECT * from typesRegressTest");
 
+            Map<String, String> expectedTypes = new HashMap<>();
+            expectedTypes.put("varcharField", "VARCHAR");
+            expectedTypes.put("charField", "CHAR");
+            expectedTypes.put("enumField", "CHAR");
+            expectedTypes.put("setField", "CHAR");
+            expectedTypes.put("tinyblobField", "TINYBLOB");
+            expectedTypes.put("mediumBlobField", "MEDIUMBLOB");
+            expectedTypes.put("longblobField", "LONGBLOB");
+            expectedTypes.put("blobField", "BLOB");
+
             ResultSetMetaData rsmd = this.rs.getMetaData();
 
             int numCols = rsmd.getColumnCount();
@@ -501,7 +505,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
             for (int i = 0; i < numCols; i++) {
                 String columnName = rsmd.getColumnName(i + 1);
                 String columnTypeName = rsmd.getColumnTypeName(i + 1);
-                System.out.println(columnName + " -> " + columnTypeName);
+                assertEquals(expectedTypes.get(columnName), columnTypeName);
             }
         } finally {
             this.stmt.execute("DROP TABLE IF EXISTS typesRegressTest");
@@ -510,7 +514,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#4742, 'DOUBLE' mapped twice in getTypeInfo().
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -528,7 +532,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#4138, getColumns() returns incorrect JDBC type for unsigned columns.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -555,7 +559,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 }
 
                 createBuf.append("field");
-                createBuf.append((i + 1));
+                createBuf.append(i + 1);
                 createBuf.append(" ");
                 createBuf.append(typesToTest[i]);
                 createBuf.append(" UNSIGNED");
@@ -587,7 +591,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 }
 
                 queryBuf.append("field");
-                queryBuf.append((i + 1));
+                queryBuf.append(i + 1);
             }
 
             queryBuf.append(" FROM testBug4138");
@@ -601,7 +605,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 assertTrue(jdbcMapping[i] == rsmd.getColumnType(i + 1));
                 String desiredTypeName = typesToTest[i] + " unsigned";
 
-                assertTrue(desiredTypeName.equalsIgnoreCase(rsmd.getColumnTypeName(i + 1)), rsmd.getColumnTypeName((i + 1)) + " != " + desiredTypeName);
+                assertTrue(desiredTypeName.equalsIgnoreCase(rsmd.getColumnTypeName(i + 1)), rsmd.getColumnTypeName(i + 1) + " != " + desiredTypeName);
             }
         } finally {
             this.stmt.executeUpdate("DROP TABLE IF EXISTS testBug4138");
@@ -610,7 +614,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Here for housekeeping only, the test is actually in testBug4138().
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -620,59 +624,55 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#4880 - RSMD.getPrecision() returns '0' for non-numeric types.
-     * 
+     *
      * Why-oh-why is this not in the spec, nor the api-docs, but in some 'optional' book, _and_ it is a variance from both ODBC and the ANSI SQL standard :p
-     * 
+     *
      * (from the CTS testsuite)....
-     * 
+     *
      * The getPrecision(int colindex) method returns an integer value representing the number of decimal digits for number types,maximum length in characters
      * for character types,maximum length in bytes for JDBC binary datatypes.
-     * 
+     *
      * (See Section 27.3 of JDBC 2.0 API Reference & Tutorial 2nd edition)
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug4880() throws Exception {
-        try {
-            this.stmt.executeUpdate("DROP TABLE IF EXISTS testBug4880");
-            this.stmt.executeUpdate("CREATE TABLE testBug4880 (field1 VARCHAR(80), field2 TINYBLOB, field3 BLOB, field4 MEDIUMBLOB, field5 LONGBLOB)");
-            this.rs = this.stmt.executeQuery("SELECT field1, field2, field3, field4, field5 FROM testBug4880");
-            ResultSetMetaData rsmd = this.rs.getMetaData();
+        createSchemaObject(this.stmt, "DATABASE", "testBug4880Db", "DEFAULT CHARACTER SET latin1");
+        createTable("testBug4880Db.testBug4880", "(field1 VARCHAR(80), field2 TINYBLOB, field3 BLOB, field4 MEDIUMBLOB, field5 LONGBLOB)");
 
-            assertEquals(80, rsmd.getPrecision(1));
-            assertEquals(Types.VARCHAR, rsmd.getColumnType(1));
-            assertEquals(80, rsmd.getColumnDisplaySize(1));
+        this.rs = this.stmt.executeQuery("SELECT field1, field2, field3, field4, field5 FROM testBug4880Db.testBug4880");
+        ResultSetMetaData rsmd = this.rs.getMetaData();
 
-            assertEquals(255, rsmd.getPrecision(2));
-            assertEquals(Types.VARBINARY, rsmd.getColumnType(2));
-            assertTrue("TINYBLOB".equalsIgnoreCase(rsmd.getColumnTypeName(2)));
-            assertEquals(255, rsmd.getColumnDisplaySize(2));
+        assertEquals(80, rsmd.getPrecision(1));
+        assertEquals(Types.VARCHAR, rsmd.getColumnType(1));
+        assertEquals(80, rsmd.getColumnDisplaySize(1));
 
-            assertEquals(65535, rsmd.getPrecision(3));
-            assertEquals(Types.LONGVARBINARY, rsmd.getColumnType(3));
-            assertTrue("BLOB".equalsIgnoreCase(rsmd.getColumnTypeName(3)));
-            assertEquals(65535, rsmd.getColumnDisplaySize(3));
+        assertEquals(255, rsmd.getPrecision(2));
+        assertEquals(Types.VARBINARY, rsmd.getColumnType(2));
+        assertTrue("TINYBLOB".equalsIgnoreCase(rsmd.getColumnTypeName(2)));
+        assertEquals(255, rsmd.getColumnDisplaySize(2));
 
-            assertEquals(16777215, rsmd.getPrecision(4));
-            assertEquals(Types.LONGVARBINARY, rsmd.getColumnType(4));
-            assertTrue("MEDIUMBLOB".equalsIgnoreCase(rsmd.getColumnTypeName(4)));
-            assertEquals(16777215, rsmd.getColumnDisplaySize(4));
+        assertEquals(65535, rsmd.getPrecision(3));
+        assertEquals(Types.LONGVARBINARY, rsmd.getColumnType(3));
+        assertTrue("BLOB".equalsIgnoreCase(rsmd.getColumnTypeName(3)));
+        assertEquals(65535, rsmd.getColumnDisplaySize(3));
 
-            // Server doesn't send us enough information to detect LONGBLOB
-            // type
-            assertEquals(Integer.MAX_VALUE, rsmd.getPrecision(5));
-            assertEquals(Types.LONGVARBINARY, rsmd.getColumnType(5));
-            assertTrue("LONGBLOB".equalsIgnoreCase(rsmd.getColumnTypeName(5)));
-            assertEquals(Integer.MAX_VALUE, rsmd.getColumnDisplaySize(5));
-        } finally {
-            this.stmt.executeUpdate("DROP TABLE IF EXISTS testBug4880");
-        }
+        assertEquals(16777215, rsmd.getPrecision(4));
+        assertEquals(Types.LONGVARBINARY, rsmd.getColumnType(4));
+        assertTrue("MEDIUMBLOB".equalsIgnoreCase(rsmd.getColumnTypeName(4)));
+        assertEquals(16777215, rsmd.getColumnDisplaySize(4));
+
+        // Server doesn't send us enough information to detect LONGBLOB type
+        assertEquals(Integer.MAX_VALUE, rsmd.getPrecision(5));
+        assertEquals(Types.LONGVARBINARY, rsmd.getColumnType(5));
+        assertTrue("LONGBLOB".equalsIgnoreCase(rsmd.getColumnTypeName(5)));
+        assertEquals(Integer.MAX_VALUE, rsmd.getColumnDisplaySize(5));
     }
 
     /**
      * Tests fix for BUG#6399, ResultSetMetaData.getDisplaySize() is wrong for multi-byte charsets.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -696,7 +696,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#7081, DatabaseMetaData.getIndexInfo() ignoring 'unique' parameters.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -721,7 +721,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#7033 - PreparedStatements don't encode Big5 (and other multibyte) character sets correctly in static SQL strings.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -734,13 +734,12 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.characterEncoding.getKeyName(), "Big5");
 
             big5Conn = getConnectionWithProps(props);
             big5Stmt = big5Conn.createStatement();
-
-            byte[] foobar = testString.getBytes("Big5");
-            System.out.println(Arrays.toString(foobar));
 
             this.rs = big5Stmt.executeQuery("select 1 as '\u5957 \u9910'");
             String retrString = this.rs.getMetaData().getColumnName(1);
@@ -773,7 +772,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#8812, DBMD.getIndexInfo() returning inverted values for 'NON_UNIQUE' column.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -801,19 +800,18 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#8800 - supportsMixedCase*Identifiers() returns wrong value on servers running on case-sensitive filesystems.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug8800() throws Exception {
         assertEquals(((com.mysql.cj.jdbc.JdbcConnection) this.conn).lowerCaseTableNames(), !this.conn.getMetaData().supportsMixedCaseIdentifiers());
         assertEquals(((com.mysql.cj.jdbc.JdbcConnection) this.conn).lowerCaseTableNames(), !this.conn.getMetaData().supportsMixedCaseQuotedIdentifiers());
-
     }
 
     /**
      * Tests fix for BUG#8792 - DBMD.supportsResultSetConcurrency() not returning true for forward-only/read-only result sets (we obviously support this).
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -858,7 +856,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#8803, 'DATA_TYPE' column from DBMD.getBestRowIdentifier() causes ArrayIndexOutOfBoundsException when accessed (and in fact, didn't
      * return any value).
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -879,13 +877,12 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 this.rs = null;
             }
         }
-
     }
 
     /**
      * Tests fix for BUG#9320 - PreparedStatement.getMetaData() inserts blank row in database under certain conditions when not using server-side prepared
      * statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -899,7 +896,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#9778, DBMD.getTables() shouldn't return tables if views are asked for, even if the database version doesn't support views.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -923,12 +920,14 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#9769 - Should accept null for procedureNamePattern, even though it isn't JDBC compliant, for legacy's sake.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug9769() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         Connection con = getConnectionWithProps(props);
         try {
 
@@ -946,12 +945,11 @@ public class MetaDataRegressionTest extends BaseTestCase {
         // getColumns();
         // getTablePrivileges();
         // getTables();
-
     }
 
     /**
      * Tests fix for BUG#9917 - Should accept null for catalog in DBMD methods, even though it's not JDBC-compliant for legacy's sake.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -991,7 +989,11 @@ public class MetaDataRegressionTest extends BaseTestCase {
             this.rs.close();
 
             // 'true' means only current database to be checked
-            Connection con = getConnectionWithProps("nullCatalogMeansCurrent=true");
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "true");
+            Connection con = getConnectionWithProps(props);
             try {
                 this.rs = con.getMetaData().getTables(null, null, tableName, null);
                 while (this.rs.next()) {
@@ -1024,7 +1026,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#11575 -- DBMD.storesLower/Mixed/UpperIdentifiers() reports incorrect values for servers deployed on Windows.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1050,7 +1052,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#11781, foreign key information that is quoted is parsed incorrectly.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1066,12 +1068,14 @@ public class MetaDataRegressionTest extends BaseTestCase {
          */
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         for (boolean useIS : new boolean[] { false, true }) {
             for (String databaseTerm : new String[] { "CATALOG", "SCHEMA" }) {
                 props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "" + useIS);
                 props.setProperty(PropertyKey.databaseTerm.getKeyName(), databaseTerm);
 
-                System.out.println("useInformationSchema=" + useIS + ", databaseTerm=" + databaseTerm);
+                // System.out.println("useInformationSchema=" + useIS + ", databaseTerm=" + databaseTerm);
 
                 Connection con = getConnectionWithProps(props);
 
@@ -1095,12 +1099,11 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
             }
         }
-
     }
 
     /**
      * Tests fix for BUG#12970 - java.sql.Types.OTHER returned for binary and varbinary columns.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1136,7 +1139,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#12975 - OpenOffice expects DBMD.supportsIEF() to return "true" if foreign keys are supported by the datasource, even though this method
      * also covers support for check constraints, which MySQL _doesn't_ have.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1147,7 +1150,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
-
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.overrideSupportsIntegrityEnhancementFacility.getKeyName(), "true");
 
             overrideConn = getConnectionWithProps(props);
@@ -1161,7 +1165,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#13277 - RSMD for generated keys has NPEs when a connection is referenced.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1224,12 +1228,11 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests BUG13601 (which doesn't seem to be present in 3.1.11, but we'll leave it in here for regression's-sake).
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug13601() throws Exception {
-
         createTable("testBug13601", "(field1 BIGINT NOT NULL, field2 BIT default 0 NOT NULL) ENGINE=MyISAM");
 
         this.rs = this.stmt.executeQuery("SELECT field1, field2 FROM testBug13601 WHERE 1=-1");
@@ -1245,7 +1248,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#14815 - DBMD.getColumns() doesn't return TABLE_NAME correctly.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1279,7 +1282,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#15854 - DBMD.getColumns() returns wrong type for BIT.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1300,7 +1303,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#16277 - Invalid classname returned for RSMD.getColumnClassName() for BIGINT type.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1313,7 +1316,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#18554 - Aliased column names where length of name > 251 are corrupted.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1331,7 +1334,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
         StringBuilder buf = new StringBuilder(columnNameLength + 2);
 
         for (int i = 0; i < columnNameLength; i++) {
-            buf.append((char) ((Math.random() * 26) + 65));
+            buf.append((char) (Math.random() * 26 + 65));
         }
 
         String colName = buf.toString();
@@ -1373,7 +1376,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#21267, ParameterMetaData throws NullPointerException when prepared SQL actually has a syntax error
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1394,6 +1397,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
         this.pstmt.close();
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.generateSimpleParameterMetadata.getKeyName(), "true");
 
         this.pstmt = getConnectionWithProps(props).prepareStatement("SELECT Col1, Col2,Col4 FROM bug21267 WHERE Col1=?");
@@ -1404,9 +1409,10 @@ public class MetaDataRegressionTest extends BaseTestCase {
     }
 
     /**
-     * Tests fix for BUG#21544 - When using information_schema for metadata, COLUMN_SIZE for getColumns() is not clamped to range of java.lang.Integer as is the
-     * case when not using information_schema, thus leading to a truncation exception that isn't present when not using information_schema.
-     * 
+     * Tests fix for BUG#21544 - When using information_schema for metadata, COLUMN_SIZE for getColumns() is not clamped to range
+     * of java.lang.Integer as is the case when not using information_schema, thus leading to a truncation exception that
+     * isn't present when not using information_schema.
+     *
      * @throws Exception
      */
     @Test
@@ -1416,6 +1422,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
         Connection infoSchemConn = null;
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "true");
         props.setProperty(PropertyKey.jdbcCompliantTruncation.getKeyName(), "false");
         props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "true");
@@ -1437,7 +1445,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#22613 - DBMD.getColumns() does not return expected COLUMN_SIZE for the SET type (fixed to be consistent with the ODBC driver)
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1451,6 +1459,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "true");
 
             infoSchemConn = getConnectionWithProps(props);
@@ -1486,7 +1496,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Fix for BUG#22628 - Driver.getPropertyInfo() throws NullPointerException for URL that only specifies host and/or port.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1536,24 +1546,26 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     @Test
     public void testCharacterSetForDBMD() throws Exception {
-        System.out.println("testCharacterSetForDBMD:");
         String quoteChar = this.conn.getMetaData().getIdentifierQuoteString();
 
-        String tableName = quoteChar + "\u00e9\u0074\u00e9" + quoteChar;
-        createTable(tableName, "(field1 int)");
+        String tableName = "\u00e9\u0074\u00e9";
+        String quotedTableName = quoteChar + tableName + quoteChar;
+        createTable(quotedTableName, "(field1 int)");
         this.rs = this.conn.getMetaData().getTables(this.conn.getCatalog(), null, "%", new String[] { "TABLE" });
-        while (this.rs.next()) {
-            System.out.println(this.rs.getString("TABLE_NAME") + " -> " + new String(this.rs.getBytes("TABLE_NAME"), "UTF-8"));
+        boolean tableFound = false;
+        while (this.rs.next() && !tableFound) {
+            tableFound = tableName.equals(this.rs.getString("TABLE_NAME")) && tableName.equals(new String(this.rs.getBytes("TABLE_NAME"), "UTF-8"));
         }
-        this.rs = this.conn.getMetaData().getTables(this.conn.getCatalog(), null, tableName, new String[] { "TABLE" });
+        assertTrue(tableFound);
+        this.rs = this.conn.getMetaData().getTables(this.conn.getCatalog(), null, quotedTableName, new String[] { "TABLE" });
         assertEquals(true, this.rs.next());
-        System.out.println(this.rs.getString("TABLE_NAME"));
-        System.out.println(new String(this.rs.getBytes("TABLE_NAME"), "UTF-8"));
+        assertEquals(tableName, this.rs.getString("TABLE_NAME"));
+        assertEquals(tableName, new String(this.rs.getBytes("TABLE_NAME"), "UTF-8"));
     }
 
     /**
      * Tests fix for BUG#18258 - Nonexistent catalog/database causes SQLException to be raised, rather than returning empty result set.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1566,7 +1578,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#23303 - DBMD.getSchemas() doesn't return a TABLE_CATALOG column.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1577,11 +1589,11 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#23304 - DBMD using "show" and DBMD using information_schema do not return results consistent with each other.
-     * 
+     *
      * (note this fix only addresses the inconsistencies, not the issue that the driver is treating schemas differently than some users expect.
-     * 
+     *
      * We will revisit this behavior when there is full support for schemas in MySQL).
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1594,9 +1606,13 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
         try {
             Properties noInfoSchemaProps = new Properties();
+            noInfoSchemaProps.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            noInfoSchemaProps.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             noInfoSchemaProps.setProperty(PropertyKey.useInformationSchema.getKeyName(), "false");
 
             Properties infoSchemaProps = new Properties();
+            infoSchemaProps.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            infoSchemaProps.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             infoSchemaProps.setProperty(PropertyKey.useInformationSchema.getKeyName(), "true");
             infoSchemaProps.setProperty(PropertyKey.dumpQueriesOnException.getKeyName(), "true");
 
@@ -1618,14 +1634,14 @@ public class MetaDataRegressionTest extends BaseTestCase {
              * "%", new String[] {"TABLE", "VIEW"}); rsInfoSchema =
              * dbmdUsingInfoSchema.getTables(connInfoSchema.getCatalog(), null,
              * "%", new String[] {"TABLE", "VIEW"});
-             * 
+             *
              * compareResultSets(rsShow, rsInfoSchema);
-             * 
+             *
              * rsShow = dbmdUsingShow.getTables(null, null, "%", new String[]
              * {"TABLE", "VIEW"}); rsInfoSchema =
              * dbmdUsingInfoSchema.getTables(null, null, "%", new String[]
              * {"TABLE", "VIEW"});
-             * 
+             *
              * compareResultSets(rsShow, rsInfoSchema);
              */
 
@@ -1704,14 +1720,10 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     private void compareResultSets(ResultSet expected, ResultSet actual) throws Exception {
         if (expected == null) {
-            if (actual != null) {
-                fail("Expected null result set, actual was not null.");
-            } else {
-                return;
-            }
-        } else if (actual == null) {
-            fail("Expected non-null actual result set.");
+            assertTrue(actual == null, "Expected null result set, actual was not null.");
+            return;
         }
+        assertFalse(actual == null, "Expected non-null actual result set.");
 
         expected.last();
 
@@ -1750,12 +1762,10 @@ public class MetaDataRegressionTest extends BaseTestCase {
                     continue;
                 }
 
-                if ((expected.getObject(i + 1) == null && actual.getObject(i + 1) != null)
-                        || (expected.getObject(i + 1) != null && actual.getObject(i + 1) == null)
-                        || (!expected.getObject(i + 1).equals(actual.getObject(i + 1)))) {
-                    if ("COLUMN_DEF".equals(metadataExpected.getColumnName(i + 1))
-                            && (expected.getObject(i + 1) == null && actual.getString(i + 1).length() == 0)
-                            || ((expected.getString(i + 1) == null || expected.getString(i + 1).length() == 0) && actual.getObject(i + 1) == null)) {
+                if (expected.getObject(i + 1) == null && actual.getObject(i + 1) != null || expected.getObject(i + 1) != null && actual.getObject(i + 1) == null
+                        || !expected.getObject(i + 1).equals(actual.getObject(i + 1))) {
+                    if ("COLUMN_DEF".equals(metadataExpected.getColumnName(i + 1)) && expected.getObject(i + 1) == null && actual.getString(i + 1).length() == 0
+                            || (expected.getString(i + 1) == null || expected.getString(i + 1).length() == 0) && actual.getObject(i + 1) == null) {
                         continue; // known bug with SHOW FULL COLUMNS, and we
                                  // can't distinguish between null and ''
                                  // for a default
@@ -1791,7 +1801,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#25624 - Whitespace surrounding storage/size specifiers in stored procedure declaration causes NumberFormatException to be thrown when
      * calling stored procedure.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1807,7 +1817,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#27867 - Schema objects with identifiers other than the connection character aren't retrieved correctly in ResultSetMetadata.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1825,7 +1835,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Fixed BUG#27915 - DatabaseMetaData.getColumns() doesn't contain SCOPE_* or IS_AUTOINCREMENT columns.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1838,7 +1848,11 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
         checkBug27915();
 
-        this.rs = getConnectionWithProps("useInformationSchema=true").getMetaData().getColumns(this.conn.getCatalog(), null, "testBug27915", "%");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "true");
+        this.rs = getConnectionWithProps(props).getMetaData().getColumns(this.conn.getCatalog(), null, "testBug27915", "%");
         this.rs.next();
 
         checkBug27915();
@@ -1863,11 +1877,11 @@ public class MetaDataRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#27916 - UNSIGNED types not reported via DBMD.getTypeInfo(), and capitalization of types is not consistent between DBMD.getColumns(),
      * RSMD.getColumnTypeName() and DBMD.getTypeInfo().
-     * 
+     *
      * This fix also ensures that the precision of UNSIGNED MEDIUMINT and UNSIGNED BIGINT is reported correctly via DBMD.getColumns().
-     * 
+     *
      * Second fix ensures that list values of ENUM and SET types containing 'unsigned' are not taken in account.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -1896,6 +1910,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
         }
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "false");
         ArrayList<String> types = new ArrayList<>();
         Connection PropConn = getConnectionWithProps(props);
@@ -1922,6 +1938,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
             PropConn.close();
             props.clear();
 
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "true");
             PropConn = getConnectionWithProps(props);
             dbmd = PropConn.getMetaData();
@@ -1949,12 +1967,6 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     @Test
     public void testBug20491() throws Exception {
-        this.rs = this.stmt.executeQuery("SHOW VARIABLES LIKE '%char%'");
-        while (this.rs.next()) {
-            System.out.println(this.rs.getString(1) + " = " + this.rs.getString(2));
-        }
-        this.rs.close();
-
         String[] fields = { "field1_ae_\u00e4", "field2_ue_\u00fc", "field3_oe_\u00f6", "field4_sz_\u00df" };
 
         createTable("tst", "(`" + fields[0] + "` int(10) unsigned NOT NULL default '0', `" + fields[1] + "` varchar(45) default '', `" + fields[2]
@@ -2022,14 +2034,14 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#33594 - When cursor fetch is enabled, wrong metadata is returned from DBMD.
-     * 
+     *
      * The fix is two parts.
-     * 
+     *
      * First, when asking for the first column value twice from a cursor-fetched row, the driver didn't re-position, and thus the "next" column was returned.
-     * 
+     *
      * Second, metadata statements and internal statements the driver uses shouldn't use cursor-based fetching at all, so we've ensured that internal statements
      * have their fetch size set to "0".
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2046,6 +2058,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
         }
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "false");
         props.setProperty(PropertyKey.useCursorFetch.getKeyName(), "false");
         props.setProperty(PropertyKey.defaultFetchSize.getKeyName(), "100");
@@ -2066,6 +2080,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
             }
 
             Properties props2 = new Properties();
+            props2.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props2.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props2.setProperty(PropertyKey.useInformationSchema.getKeyName(), "false");
             props2.setProperty(PropertyKey.useCursorFetch.getKeyName(), "true");
             props2.setProperty(PropertyKey.defaultFetchSize.getKeyName(), "100");
@@ -2120,12 +2136,14 @@ public class MetaDataRegressionTest extends BaseTestCase {
     @Test
     public void testNoSystemTablesReturned() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         for (boolean useIS : new boolean[] { false, true }) {
             for (boolean dbMapsToSchema : new boolean[] { false, true }) {
                 props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "" + useIS);
                 props.setProperty(PropertyKey.databaseTerm.getKeyName(), dbMapsToSchema ? DatabaseTerm.SCHEMA.name() : DatabaseTerm.CATALOG.name());
 
-                System.out.println("useIS=" + useIS + ", dbMapsToSchema=" + dbMapsToSchema);
+                // System.out.println("useIS=" + useIS + ", dbMapsToSchema=" + dbMapsToSchema);
 
                 Connection conn1 = null;
                 try {
@@ -2167,10 +2185,29 @@ public class MetaDataRegressionTest extends BaseTestCase {
     @Test
     public void testABunchOfReturnTypes() throws Exception {
         checkABunchOfReturnTypesForConnection(this.conn);
-        checkABunchOfReturnTypesForConnection(getConnectionWithProps("useInformationSchema=true"));
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "true");
+        checkABunchOfReturnTypesForConnection(getConnectionWithProps(props));
     }
 
     private void checkABunchOfReturnTypesForConnection(Connection mdConn) throws Exception {
+        // Setup.
+        final Map<Integer, String> sqlTypesMap = new HashMap<>();
+        Field[] typeFields = Types.class.getFields();
+
+        for (int i = 0; i < typeFields.length; i++) {
+            if (Modifier.isStatic(typeFields[i].getModifiers())) {
+                try {
+                    sqlTypesMap.put(new Integer(typeFields[i].getInt(null)), "java.sql.Types." + typeFields[i].getName());
+                } catch (IllegalArgumentException | IllegalAccessException e) {
+                    // ignore
+                }
+            }
+        }
+
+        // Test.
         DatabaseMetaData md = mdConn.getMetaData();
 
         // Bug#44862 - getBestRowIdentifier does not return resultset as per JDBC API specifications
@@ -2186,7 +2223,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 Types.SMALLINT, // 8. PSEUDO_COLUMN short => is this a pseudo column like an Oracle ROWID
         };
 
-        checkTypes(this.rs, types);
+        checkTypes(this.rs, types, sqlTypesMap);
 
         // Bug#44683 - getVersionColumns does not return resultset as per JDBC API specifications
         this.rs = md.getVersionColumns(this.conn.getCatalog(), null, "returnTypesTest");
@@ -2201,7 +2238,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 Types.SMALLINT // PSEUDO_COLUMN short => whether this is pseudo column like an Oracle ROWID
         };
 
-        checkTypes(this.rs, types);
+        checkTypes(this.rs, types, sqlTypesMap);
 
         // Bug#44865 - getColumns does not return resultset as per JDBC API specifications
         this.rs = md.getColumns(this.conn.getCatalog(), null, "returnTypesTest", "foo");
@@ -2224,7 +2261,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 Types.INTEGER, // 15. SQL_DATETIME_SUB int => unused
                 Types.INTEGER, // 16. CHAR_OCTET_LENGTH int => for char types the maximum number of bytes in the column
                 Types.INTEGER, // 17. ORDINAL_POSITION int => index of column in table (starting at 1)
-                Types.CHAR, // 18. IS_NULLABLE String => "NO" means column definitely does not allow NULL values; "YES" means the column might allow NULL 
+                Types.CHAR, // 18. IS_NULLABLE String => "NO" means column definitely does not allow NULL values; "YES" means the column might allow NULL
                 // values. An empty string means nobody knows.
                 Types.CHAR, // 19. SCOPE_CATLOG String => catalog of table that is the scope of a reference attribute (null if DATA_TYPE isn't REF)
                 Types.CHAR, // 20. SCOPE_SCHEMA String => schema of table that is the scope of a reference attribute (null if the DATA_TYPE isn't REF)
@@ -2232,10 +2269,10 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 Types.SMALLINT, // 22. SOURCE_DATA_TYPE short => source type of a distinct type or user-generated Ref type, SQL type from java.sql.Types (null
                 // if DATA_TYPE isn't DISTINCT or user-generated REF)
                 Types.CHAR, // 23. IS_AUTOINCREMENT String => Indicates whether this column is auto incremented
-                Types.CHAR // 24. IS_GENERATEDCOLUMN String => Indicates whether this is a generated column 
+                Types.CHAR // 24. IS_GENERATEDCOLUMN String => Indicates whether this is a generated column
         };
 
-        checkTypes(this.rs, types);
+        checkTypes(this.rs, types, sqlTypesMap);
 
         // Bug#44868 - getTypeInfo does not return resultset as per JDBC API specifications
         this.rs = md.getTypeInfo();
@@ -2260,7 +2297,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 Types.INTEGER // 18. NUM_PREC_RADIX int => usually 2 or 10
         };
 
-        checkTypes(this.rs, types);
+        checkTypes(this.rs, types, sqlTypesMap);
 
         // Bug#44869 - getIndexInfo does not return resultset as per JDBC API specifications
         this.rs = md.getIndexInfo(this.conn.getCatalog(), null, "returnTypesTest", false, false);
@@ -2283,7 +2320,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 Types.CHAR // 13. FILTER_CONDITION String => Filter condition, if any. (may be null)
         };
 
-        checkTypes(this.rs, types);
+        checkTypes(this.rs, types, sqlTypesMap);
 
         // Bug#44867 - getImportedKeys/exportedKeys/crossReference doesn't have correct type for DEFERRABILITY
         this.rs = md.getImportedKeys(this.conn.getCatalog(), null, "returnTypesTest");
@@ -2304,7 +2341,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 Types.SMALLINT // DEFERRABILITY short => can the evaluation of foreign key constraints be deferred until commit
         };
 
-        checkTypes(this.rs, types);
+        checkTypes(this.rs, types, sqlTypesMap);
 
         this.rs = md.getExportedKeys(this.conn.getCatalog(), null, "returnTypesTest");
 
@@ -2324,7 +2361,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 Types.SMALLINT // DEFERRABILITY short => can the evaluation of foreign key constraints be deferred until commit
         };
 
-        checkTypes(this.rs, types);
+        checkTypes(this.rs, types, sqlTypesMap);
 
         this.rs = md.getCrossReference(this.conn.getCatalog(), null, "returnTypesTest", this.conn.getCatalog(), null, "bar");
 
@@ -2344,35 +2381,15 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 Types.SMALLINT // DEFERRABILITY short => can the evaluation of foreign key constraints be deferred until commit
         };
 
-        checkTypes(this.rs, types);
+        checkTypes(this.rs, types, sqlTypesMap);
     }
 
-    private final static Map<Integer, String> TYPES_MAP = new HashMap<>();
-
-    static {
-        Field[] typeFields = Types.class.getFields();
-
-        for (int i = 0; i < typeFields.length; i++) {
-            System.out.println(typeFields[i].getName() + " -> " + typeFields[i].getType().getClass());
-
-            if (Modifier.isStatic(typeFields[i].getModifiers())) {
-                try {
-                    TYPES_MAP.put(new Integer(typeFields[i].getInt(null)), "java.sql.Types." + typeFields[i].getName());
-                } catch (IllegalArgumentException e) {
-                    // ignore
-                } catch (IllegalAccessException e) {
-                    // ignore
-                }
-            }
-        }
-    }
-
-    private void checkTypes(ResultSet rsToCheck, int[] types) throws Exception {
+    private void checkTypes(ResultSet rsToCheck, int[] types, Map<Integer, String> sqlTypesMap) throws Exception {
         ResultSetMetaData rsmd = rsToCheck.getMetaData();
         assertEquals(types.length, rsmd.getColumnCount());
         for (int i = 0; i < types.length; i++) {
-            String expectedType = TYPES_MAP.get(new Integer(types[i]));
-            String actualType = TYPES_MAP.get(new Integer(rsmd.getColumnType(i + 1)));
+            String expectedType = sqlTypesMap.get(new Integer(types[i]));
+            String actualType = sqlTypesMap.get(new Integer(rsmd.getColumnType(i + 1)));
             assertNotNull(expectedType);
             assertNotNull(actualType);
             assertEquals(expectedType, actualType, "Unexpected type in column " + (i + 1));
@@ -2381,14 +2398,18 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Bug #43714 - useInformationSchema with DatabaseMetaData.getExportedKeys() throws exception
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug43714() throws Exception {
         Connection c_IS = null;
         try {
-            c_IS = getConnectionWithProps("useInformationSchema=true");
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "true");
+            c_IS = getConnectionWithProps(props);
             DatabaseMetaData dbmd = c_IS.getMetaData();
             this.rs = dbmd.getExportedKeys("x", "y", "z");
         } finally {
@@ -2403,14 +2424,18 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Bug #41269 - DatabaseMetadata.getProcedureColumns() returns wrong value for column length
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug41269() throws Exception {
         createProcedure("bug41269", "(in param1 int, out result varchar(197)) BEGIN select 1, ''; END");
 
-        Connection con = getConnectionWithProps("nullCatalogMeansCurrent=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "true");
+        Connection con = getConnectionWithProps(props);
         try {
             ResultSet procMD = con.getMetaData().getProcedureColumns(null, null, "bug41269", "%");
             assertTrue(procMD.next());
@@ -2429,7 +2454,11 @@ public class MetaDataRegressionTest extends BaseTestCase {
     public void testBug31187() throws Exception {
         createTable("testBug31187", "(field1 int)");
 
-        Connection nullCatConn = getConnectionWithProps("nullCatalogMeansCurrent=false");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "false");
+        Connection nullCatConn = getConnectionWithProps(props);
         DatabaseMetaData dbmd = nullCatConn.getMetaData();
         ResultSet dbTblCols = dbmd.getColumns(null, null, "testBug31187", "%");
 
@@ -2443,7 +2472,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
             boolean useLowerCaseTableNames = dbmd.storesLowerCaseIdentifiers();
 
             if (db.equals(dbMapsToSchema ? nullCatConn.getSchema() : nullCatConn.getCatalog())
-                    && (((useLowerCaseTableNames && "testBug31187".equalsIgnoreCase(table)) || "testBug31187".equals(table)))) {
+                    && (useLowerCaseTableNames && "testBug31187".equalsIgnoreCase(table) || "testBug31187".equals(table))) {
                 found = true;
             }
         }
@@ -2464,7 +2493,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#52167 - Can't parse parameter list with special characters inside
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2482,7 +2511,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#51912 - Passing NULL as cat. param to getProcedureColumns with nullCatalogMeansCurrent = false
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2490,6 +2519,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
         Connection overrideConn = null;
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "false");
             overrideConn = getConnectionWithProps(props);
 
@@ -2512,7 +2543,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
      * assertTrue("Parameter " + columnName + " do not allow null arguments",
      * columnNullable.intValue() == java.sql.DatabaseMetaData.procedureNullable);
      * was failing for no good reason.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2521,6 +2552,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 "(OUT nfact VARCHAR(100), IN ccuenta VARCHAR(100),\nOUT ffact VARCHAR(100),\nOUT fdoc VARCHAR(100))" + "\nBEGIN\nEND");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         Connection con = getConnectionWithProps(props);
         try {
             DatabaseMetaData dbMeta = con.getMetaData();
@@ -2540,7 +2573,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#57808 - wasNull not set for DATE field with value 0000-00-00 in getDate() although zeroDateTimeBehavior is CONVERT_TO_NULL.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2548,6 +2581,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
         try {
             createTable("bug57808", "(ID INT(3) NOT NULL PRIMARY KEY, ADate DATE NOT NULL)");
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             if (versionMeetsMinimum(5, 7, 4)) {
                 props.setProperty(PropertyKey.jdbcCompliantTruncation.getKeyName(), "false");
             }
@@ -2568,11 +2603,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
             this.rs = this.stmt.executeQuery("SELECT ID, ADate FROM bug57808 WHERE ID = 1");
             if (this.rs.first()) {
                 Date theDate = this.rs.getDate("ADate");
-                if (theDate == null) {
-                    assertTrue(this.rs.wasNull(), "wasNull is FALSE");
-                } else {
-                    fail("Original date was not NULL!");
-                }
+                assertNull(theDate, "Original date was not NULL!");
+                assertTrue(this.rs.wasNull(), "wasNull is FALSE");
             }
         } finally {
         }
@@ -2582,7 +2614,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
      * Tests fix for BUG#61150 - First call to SP fails with "No Database Selected"
      * The workaround introduced in DatabaseMetaData.getCallStmtParameterTypes to fix the bug in server where SHOW CREATE PROCEDURE was not respecting
      * lower-case table names is misbehaving when connection is not attached to database and on non-casesensitive OS.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2593,6 +2625,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
         Statement savedSt = this.stmt;
 
         Properties props = getHostFreePropertiesFromTestsuiteUrl();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.remove(PropertyKey.DBNAME.getKeyName());
         Connection conn1 = DriverManager.getConnection(newUrlToTestNoDB.toString(), props);
 
@@ -2637,12 +2671,14 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#61332 - Check if "LIKE" or "=" is sent to server in I__S query when no wildcards are supplied for schema parameter.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug61332() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "true");
         props.setProperty(PropertyKey.queryInterceptors.getKeyName(), QueryInterceptorBug61332.class.getName());
 
@@ -2662,15 +2698,17 @@ public class MetaDataRegressionTest extends BaseTestCase {
     }
 
     public static class QueryInterceptorBug61332 extends BaseQueryInterceptor {
+
         @Override
         public <T extends Resultset> T preProcess(Supplier<String> str, Query interceptedQuery) {
             String sql = str.get();
             if (interceptedQuery instanceof ClientPreparedStatement) {
                 sql = ((ClientPreparedStatement) interceptedQuery).getPreparedSql();
-                assertTrue(StringUtils.indexOfIgnoreCase(0, sql, "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?") > -1, "Assereet failed on: " + sql);
+                assertTrue(StringUtils.indexOfIgnoreCase(0, sql, "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?") > -1, "Failed on: " + sql);
             }
             return null;
         }
+
     }
 
     @Test
@@ -2693,7 +2731,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#61203 - noAccessToProcedureBodies does not work anymore.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2755,9 +2793,17 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     private void testBug61203checks(Connection rootConn, Connection userConn) throws SQLException {
         CallableStatement cStmt = null;
+
         // 1.1. with information schema
-        rootConn = getConnectionWithProps("noAccessToProcedureBodies=true,useInformationSchema=true");
-        userConn = getConnectionWithProps("noAccessToProcedureBodies=true,useInformationSchema=true,user=bug61203user,password=foo");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.noAccessToProcedureBodies.getKeyName(), "true");
+        props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "true");
+        rootConn = getConnectionWithProps(props);
+        props.setProperty(PropertyKey.USER.getKeyName(), "bug61203user");
+        props.setProperty(PropertyKey.PASSWORD.getKeyName(), "foo");
+        userConn = getConnectionWithProps(props);
         // 1.1.1. root call;
         callFunction(cStmt, rootConn);
         callProcedure(cStmt, rootConn);
@@ -2766,8 +2812,15 @@ public class MetaDataRegressionTest extends BaseTestCase {
         callProcedure(cStmt, userConn);
 
         // 1.2. no information schema
-        rootConn = getConnectionWithProps("noAccessToProcedureBodies=true,useInformationSchema=false");
-        userConn = getConnectionWithProps("noAccessToProcedureBodies=true,useInformationSchema=false,user=bug61203user,password=foo");
+        props.clear();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.noAccessToProcedureBodies.getKeyName(), "true");
+        props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "false");
+        rootConn = getConnectionWithProps(props);
+        props.setProperty(PropertyKey.USER.getKeyName(), "bug61203user");
+        props.setProperty(PropertyKey.PASSWORD.getKeyName(), "foo");
+        userConn = getConnectionWithProps(props);
         // 1.2.1. root call;
         callFunction(cStmt, rootConn);
         callProcedure(cStmt, rootConn);
@@ -2796,7 +2849,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#63456 - MetaData precision is different when using UTF8 or Latin1 tables
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2806,8 +2859,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
         createTable("testBug63456_utf8", "(TEST VARCHAR(10)) DEFAULT CHARACTER SET utf8");
         createTable("testBug63456_utf8_bin", "(TEST VARCHAR(10)) DEFAULT CHARACTER SET utf8 COLLATE utf8_bin");
 
-        //this.rs = this.stmt.executeQuery("select * from testBug63456_custom1"); 
-        //int precision_custom1 = this.rs.getMetaData().getPrecision(1); 
+        //this.rs = this.stmt.executeQuery("select * from testBug63456_custom1");
+        //int precision_custom1 = this.rs.getMetaData().getPrecision(1);
         //assertEquals(10, precision_custom1);
 
         this.rs = this.stmt.executeQuery("select * from testBug63456_latin1");
@@ -2825,7 +2878,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#63800 - getVersionColumns() does not return timestamp fields; always empty.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -2838,6 +2891,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
             for (boolean useIS : new boolean[] { false, true }) {
                 for (boolean dbMapsToSchema : new boolean[] { false, true }) {
                     props = new Properties();
+                    props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+                    props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
                     if (versionMeetsMinimum(5, 7, 4)) {
                         props.setProperty(PropertyKey.jdbcCompliantTruncation.getKeyName(), "false");
                     }
@@ -2867,8 +2922,6 @@ public class MetaDataRegressionTest extends BaseTestCase {
                             conn2.close();
                         }
                     }
-
-                    System.out.println("useIS=" + useIS + ", dbMapsToSchema=" + dbMapsToSchema);
                 }
             }
         } finally {
@@ -3062,7 +3115,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#16436511 - getDriverName() returns a string with company name "MySQL-AB"
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3073,36 +3126,37 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Test fix for BUG#68098 - DatabaseMetaData.getIndexInfo sorts results incorrectly.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug68098() throws Exception {
-        String[] testStepDescription = new String[] { "MySQL MetaData", "I__S MetaData" };
-        Connection connUseIS = getConnectionWithProps("useInformationSchema=true");
-        Connection[] testConnections = new Connection[] { this.conn, connUseIS };
         String[] expectedIndexesOrder = new String[] { "index_1", "index_1", "index_3", "PRIMARY", "index_2", "index_2", "index_4" };
 
-        this.stmt.execute("DROP TABLE IF EXISTS testBug68098");
-
         createTable("testBug68098", "(column_1 INT NOT NULL, column_2 INT NOT NULL, column_3 INT NOT NULL, PRIMARY KEY (column_1))");
-
         this.stmt.execute("CREATE INDEX index_4 ON testBug68098 (column_2)");
         this.stmt.execute("CREATE UNIQUE INDEX index_3 ON testBug68098 (column_3)");
         this.stmt.execute("CREATE INDEX index_2 ON testBug68098 (column_2, column_1)");
         this.stmt.execute("CREATE UNIQUE INDEX index_1 ON testBug68098 (column_3, column_2)");
 
-        for (int i = 0; i < testStepDescription.length; i++) {
-            DatabaseMetaData testDbMetaData = testConnections[i].getMetaData();
+        boolean useIS = false;
+        do {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.useInformationSchema.getKeyName(), Boolean.toString(useIS));
+
+            Connection testConn = getConnectionWithProps(props);
+            DatabaseMetaData testDbMetaData = testConn.getMetaData();
             this.rs = testDbMetaData.getIndexInfo(this.dbName, null, "testBug68098", false, false);
             int ind = 0;
             while (this.rs.next()) {
-                assertEquals(expectedIndexesOrder[ind++], this.rs.getString("INDEX_NAME"), testStepDescription[i] + ", sort order is wrong");
+                assertEquals(expectedIndexesOrder[ind++], this.rs.getString("INDEX_NAME"),
+                        (useIS ? "I_S MetaData" : "MySQL MetaData") + ", sort order is wrong");
             }
             this.rs.close();
-        }
-
-        connUseIS.close();
+            testConn.close();
+        } while (useIS = !useIS);
     }
 
     /**
@@ -3112,7 +3166,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
      * not JDBC-compliant but used by third party tools. So when you pass the identifier "`dbname`" in unquoted form (`dbname`) driver handles it as quoted by
      * "`" symbol. To handle such identifiers correctly a new behavior was added to pedantic mode (connection property pedantic=true), now if it set to true
      * methods like DatabaseMetaData.getColumns() treat all parameters as unquoted.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3127,6 +3181,9 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
         try {
             Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+
             props.setProperty(PropertyKey.sessionVariables.getKeyName(), "sql_mode=ansi");
             nonPedanticConn = getConnectionWithProps(props);
 
@@ -3139,16 +3196,16 @@ public class MetaDataRegressionTest extends BaseTestCase {
             props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "false");
             pedanticConn = getConnectionWithProps(props);
 
-            System.out.println("1. Non-pedantic, without I_S.");
+            // 1. Non-pedantic, without I_S.
             testBug65871_testCatalogs(nonPedanticConn);
 
-            System.out.println("2. Pedantic, without I_S.");
+            // 2. Pedantic, without I_S.
             testBug65871_testCatalogs(pedanticConn);
 
-            System.out.println("3. Non-pedantic, with I_S.");
+            // 3. Non-pedantic, with I_S.
             testBug65871_testCatalogs(nonPedanticConn_IS);
 
-            System.out.println("4. Pedantic, with I_S.");
+            // 4. Pedantic, with I_S.
             testBug65871_testCatalogs(pedanticConn_IS);
 
         } finally {
@@ -3181,11 +3238,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
             st1.executeUpdate("DROP DATABASE IF EXISTS " + quotedDbName);
             st1.executeUpdate("CREATE DATABASE " + quotedDbName);
             this.rs = st1.executeQuery("show databases like '" + unquotedDbName + "'");
-            if (this.rs.next()) {
-                assertEquals(unquotedDbName, this.rs.getString(1));
-            } else {
-                fail("Database " + unquotedDbName + " (quoted " + quotedDbName + ") not found.");
-            }
+            assertTrue(this.rs.next(), "Database " + unquotedDbName + " (quoted " + quotedDbName + ") not found.");
+            assertEquals(unquotedDbName, this.rs.getString(1));
 
             boolean pedantic = ((MysqlConnection) conn1).getPropertySet().getBooleanProperty(PropertyKey.pedantic).getValue();
 
@@ -3379,12 +3433,14 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#69298 - Different outcome from DatabaseMetaData.getFunctions() when using I__S.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug69298() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "true");
 
         Connection testConn;
@@ -3646,12 +3702,14 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#17248345 - GETFUNCTIONCOLUMNS() METHOD RETURNS COLUMNS OF PROCEDURE. (this happens when functions and procedures have a common name)
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug17248345() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "true");
 
         Connection testConn;
@@ -3765,23 +3823,40 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#69290 - JDBC Table type "SYSTEM TABLE" is used inconsistently.
-     * 
+     *
      * Tests DatabaseMetaData.getTableTypes() and DatabaseMetaData.getTables() against schemas: mysql, information_schema, performance_schema, test.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug69290() throws Exception {
         String[] testStepDescription = new String[] { "MySQL MetaData", "I__S MetaData" };
-        Connection connUseIS = getConnectionWithProps("useInformationSchema=true");
-        Connection connNullAll = getConnectionWithProps("nullCatalogMeansCurrent=false");
-        Connection connUseISAndNullAll = getConnectionWithProps("useInformationSchema=true,nullCatalogMeansCurrent=false");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "true");
+        props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "true");
+        Connection connUseISAndNullCurr = getConnectionWithProps(props);
+
+        props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "true");
+        props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "false");
+        Connection connUseISAndNullAll = getConnectionWithProps(props);
+
+        props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "false");
+        props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "true");
+        Connection connUseMySqlAndNullCurr = getConnectionWithProps(props);
+
+        props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "false");
+        props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "false");
+        Connection connUseMySqlAndNullAll = getConnectionWithProps(props);
+
         boolean dbMapsToSchema = ((JdbcConnection) this.conn).getPropertySet().<DatabaseTerm>getEnumProperty(PropertyKey.databaseTerm)
                 .getValue() == DatabaseTerm.SCHEMA;
 
         final String testDb = dbMapsToSchema ? this.conn.getSchema() : this.conn.getCatalog();
 
-        Connection[] testConnections = new Connection[] { this.conn, connUseIS };
+        Connection[] testConnections = new Connection[] { connUseMySqlAndNullCurr, connUseISAndNullCurr };
 
         // check table types returned in getTableTypes()
         final List<String> tableTypes = Arrays.asList(new String[] { "LOCAL TEMPORARY", "SYSTEM TABLE", "SYSTEM VIEW", "TABLE", "VIEW" });
@@ -3793,9 +3868,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
             int idx = 0;
             while (this.rs.next()) {
                 String message = testStepDescription[i] + ", table type '" + this.rs.getString("TABLE_TYPE") + "'";
-                if (idx >= tableTypes.size()) {
-                    fail(message + " not expected.");
-                }
+                assertFalse(idx >= tableTypes.size(), message + " not expected.");
                 assertEquals(tableTypes.get(idx++), this.rs.getString("TABLE_TYPE"), message);
             }
         }
@@ -3855,7 +3928,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
         assertTrue(countResults[0][2] == countResults[1][2], "The number of results from getTables() MySQl(" + countResults[0][2] + ") and I__S("
                 + countResults[1][2] + ") should be the same for 'performance_schema' catalog/schema.");
 
-        testConnections = new Connection[] { connNullAll, connUseISAndNullAll };
+        testConnections = new Connection[] { connUseMySqlAndNullAll, connUseISAndNullAll };
         countResults = new int[][] { { 0, 0, 0, 0, 0 }, { 0, 0, 0, 0, 0 } };
 
         // check table types returned in getTables() for all catalogs/schemas and filter by table type (tested with property nullCatalogMeansCurrent=false)
@@ -3886,7 +3959,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#35115 - yearIsDateType=false has no effect on result's column type and class.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3900,13 +3973,17 @@ public class MetaDataRegressionTest extends BaseTestCase {
         /*
          * test connection with property 'yearIsDateType=false'
          */
-        testConnection = getConnectionWithProps("yearIsDateType=false");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.yearIsDateType.getKeyName(), "false");
+        testConnection = getConnectionWithProps(props);
         Statement st = testConnection.createStatement();
         this.rs = st.executeQuery("SELECT * FROM testBug35115");
         rsMetaData = this.rs.getMetaData();
 
         assertTrue(this.rs.next());
-        assertEquals(Types.DATE, rsMetaData.getColumnType(1), "YEAR columns should be treated as java.sql.Types.DATE");
+        assertEquals(Types.SMALLINT, rsMetaData.getColumnType(1), "YEAR columns should be treated as java.sql.Types.SMALLINT");
         assertEquals("YEAR", rsMetaData.getColumnTypeName(1), "YEAR columns should be identified as 'YEAR'");
         assertEquals(java.lang.Short.class.getName(), rsMetaData.getColumnClassName(1), "YEAR columns should be mapped to java.lang.Short");
         assertEquals(java.lang.Short.class.getName(), this.rs.getObject(1).getClass().getName(), "YEAR columns should be returned as java.lang.Short");
@@ -3916,7 +3993,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
         /*
          * test connection with property 'yearIsDateType=true'
          */
-        testConnection = getConnectionWithProps("yearIsDateType=true");
+        props.setProperty(PropertyKey.yearIsDateType.getKeyName(), "true");
+        testConnection = getConnectionWithProps(props);
         st = testConnection.createStatement();
         this.rs = st.executeQuery("SELECT * FROM testBug35115");
         rsMetaData = this.rs.getMetaData();
@@ -3932,7 +4010,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#68307 - getFunctionColumns() returns incorrect "COLUMN_TYPE" information. This is a JDBC4 feature.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -3947,7 +4025,11 @@ public class MetaDataRegressionTest extends BaseTestCase {
         checkProcedureColumnTypeForBug68307("MySQL", testDbMetaData);
 
         // test metadata from I__S
-        Connection connUseIS = getConnectionWithProps("useInformationSchema=true");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "true");
+        Connection connUseIS = getConnectionWithProps(props);
         testDbMetaData = connUseIS.getMetaData();
         checkFunctionColumnTypeForBug68307("I__S", testDbMetaData);
         checkProcedureColumnTypeForBug68307("I__S", testDbMetaData);
@@ -3994,36 +4076,34 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#44451 - getTables does not return resultset with expected columns.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug44451() throws Exception {
-        String methodName;
-        List<String> expectedFields;
-        String[] testStepDescription = new String[] { "MySQL MetaData", "I__S MetaData" };
-        Connection connUseIS = getConnectionWithProps("useInformationSchema=true");
-        Connection[] testConnections = new Connection[] { this.conn, connUseIS };
+        boolean useIS = false;
+        do {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.useInformationSchema.getKeyName(), Boolean.toString(useIS));
+            Connection testConn = getConnectionWithProps(props);
+            DatabaseMetaData testDbMetaData = testConn.getMetaData();
 
-        methodName = "getClientInfoProperties()";
-        expectedFields = Arrays.asList("NAME", "MAX_LEN", "DEFAULT_VALUE", "DESCRIPTION");
-        for (int i = 0; i < testStepDescription.length; i++) {
-            DatabaseMetaData testDbMetaData = testConnections[i].getMetaData();
+            String methodName = "getClientInfoProperties()";
+            List<String> expectedFields = Arrays.asList("NAME", "MAX_LEN", "DEFAULT_VALUE", "DESCRIPTION");
             this.rs = testDbMetaData.getClientInfoProperties();
-            checkReturnedColumnsForBug44451(testStepDescription[i], methodName, expectedFields, this.rs);
+            checkReturnedColumnsForBug44451(useIS ? "I_S MetaData" : "MySQL MetaData", methodName, expectedFields, this.rs);
             this.rs.close();
-        }
 
-        methodName = "getFunctions()";
-        expectedFields = Arrays.asList("FUNCTION_CAT", "FUNCTION_SCHEM", "FUNCTION_NAME", "REMARKS", "FUNCTION_TYPE", "SPECIFIC_NAME");
-        for (int i = 0; i < testStepDescription.length; i++) {
-            DatabaseMetaData testDbMetaData = testConnections[i].getMetaData();
+            methodName = "getFunctions()";
+            expectedFields = Arrays.asList("FUNCTION_CAT", "FUNCTION_SCHEM", "FUNCTION_NAME", "REMARKS", "FUNCTION_TYPE", "SPECIFIC_NAME");
             this.rs = testDbMetaData.getFunctions(null, null, "%");
-            checkReturnedColumnsForBug44451(testStepDescription[i], methodName, expectedFields, this.rs);
+            checkReturnedColumnsForBug44451(useIS ? "I_S MetaData" : "MySQL MetaData", methodName, expectedFields, this.rs);
             this.rs.close();
-        }
 
-        connUseIS.close();
+            testConn.close();
+        } while (useIS = !useIS);
     }
 
     private void checkReturnedColumnsForBug44451(String stepDescription, String methodName, List<String> expectedFields, ResultSet resultSetToCheck)
@@ -4037,12 +4117,11 @@ public class MetaDataRegressionTest extends BaseTestCase {
             assertEquals(expectedFields.get(i), rsMetaData.getColumnName(position),
                     stepDescription + ", wrong column at position '" + position + "' in method '" + methodName + "'.");
         }
-        this.rs.close();
     }
 
     /**
      * Tests fix for BUG#20504139 - GETFUNCTIONCOLUMNS() AND GETPROCEDURECOLUMNS() RETURNS ERROR FOR VALID INPUTS.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -4059,9 +4138,16 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
             String connProps = String.format("pedantic=%s,useInformationSchema=%s,getProceduresReturnsFunctions=%s", usePedantic, useInformationSchema,
                     useFuncsInProcs);
-            System.out.printf("testBug20504139_%d: %s%n", testCase, connProps);
+            String testDesc = String.format("testBug20504139_%d: %s%n", testCase, connProps);
 
-            Connection testConn = getConnectionWithProps(connProps);
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            props.setProperty(PropertyKey.pedantic.getKeyName(), "" + usePedantic);
+            props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "" + useInformationSchema);
+            props.setProperty(PropertyKey.getProceduresReturnsFunctions.getKeyName(), "" + useFuncsInProcs);
+
+            Connection testConn = getConnectionWithProps(props);
             DatabaseMetaData dbmd = testConn.getMetaData();
             boolean dbMapsToSchema = ((JdbcConnection) testConn).getPropertySet().<DatabaseTerm>getEnumProperty(PropertyKey.databaseTerm)
                     .getValue() == DatabaseTerm.SCHEMA;
@@ -4078,25 +4164,25 @@ public class MetaDataRegressionTest extends BaseTestCase {
                         testRs = dbMapsToSchema ? dbmd.getProcedureColumns("", this.dbName, name, "%") : dbmd.getProcedureColumns(this.dbName, "", name, "%");
 
                         if (useFuncsInProcs) {
-                            assertTrue(testRs.next());
-                            assertEquals("", testRs.getString(4), testCase + "." + i + ". expected function column name (empty)");
+                            assertTrue(testRs.next(), testDesc);
+                            assertEquals("", testRs.getString(4), testDesc + "; " + testCase + "." + i + ". expected function column name (empty)");
                             assertEquals(DatabaseMetaData.procedureColumnReturn, testRs.getInt(5),
-                                    testCase + "." + i + ". expected function column type (empty)");
-                            assertTrue(testRs.next());
-                            assertEquals("namef", testRs.getString(4), testCase + "." + i + ". expected function column name");
-                            assertEquals(DatabaseMetaData.procedureColumnIn, testRs.getInt(5), testCase + "." + i + ". expected function column type (empty)");
-                            assertFalse(testRs.next());
+                                    testDesc + "; " + testCase + "." + i + ". expected function column type (empty)");
+                            assertTrue(testRs.next(), testDesc);
+                            assertEquals("namef", testRs.getString(4), testDesc + "; " + testCase + "." + i + ". expected function column name");
+                            assertEquals(DatabaseMetaData.procedureColumnIn, testRs.getInt(5),
+                                    testDesc + "; " + testCase + "." + i + ". expected function column type (empty)");
+                            assertFalse(testRs.next(), testDesc);
                         } else {
-                            assertFalse(testRs.next());
+                            assertFalse(testRs.next(), testDesc);
                         }
 
                         testRs.close();
                         i++;
                     }
                 } catch (SQLException e) {
-                    if (e.getMessage().matches("FUNCTION `testBug20504139(:?`{2})?[fp]` does not exist")) {
-                        fail(testCase + "." + i + ". failed to retrieve function columns, with getProcedureColumns(), from database meta data.");
-                    }
+                    assertFalse(e.getMessage().matches("FUNCTION `testBug20504139(:?`{2})?[fp]` does not exist"), testDesc + "; " + testCase + "." + i
+                            + ". failed to retrieve function columns, with getProcedureColumns(), from database meta data.");
                     throw e;
                 }
 
@@ -4117,9 +4203,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
                         i++;
                     }
                 } catch (SQLException e) {
-                    if (e.getMessage().matches("PROCEDURE `testBug20504139(:?`{2})?[fp]` does not exist")) {
-                        fail(testCase + "." + i + ". failed to retrieve prodedure columns, with getProcedureColumns(), from database meta data.");
-                    }
+                    assertFalse(e.getMessage().matches("PROCEDURE `testBug20504139(:?`{2})?[fp]` does not exist"),
+                            testCase + "." + i + ". failed to retrieve prodedure columns, with getProcedureColumns(), from database meta data.");
                     throw e;
                 }
 
@@ -4143,9 +4228,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
                         i++;
                     }
                 } catch (SQLException e) {
-                    if (e.getMessage().matches("FUNCTION `testBug20504139(:?`{2})?[fp]` does not exist")) {
-                        fail(testCase + "." + i + ". failed to retrieve function columns, with getFunctionColumns(), from database meta data.");
-                    }
+                    assertFalse(e.getMessage().matches("FUNCTION `testBug20504139(:?`{2})?[fp]` does not exist"),
+                            testCase + "." + i + ". failed to retrieve function columns, with getFunctionColumns(), from database meta data.");
                     throw e;
                 }
 
@@ -4163,9 +4247,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
                         i++;
                     }
                 } catch (SQLException e) {
-                    if (e.getMessage().matches("PROCEDURE `testBug20504139(:?`{2})?[fp]` does not exist")) {
-                        fail(testCase + "." + i + ". failed to retrieve procedure columns, with getFunctionColumns(), from database meta data.");
-                    }
+                    assertFalse(e.getMessage().matches("PROCEDURE `testBug20504139(:?`{2})?[fp]` does not exist"),
+                            testCase + "." + i + ". failed to retrieve procedure columns, with getFunctionColumns(), from database meta data.");
                     throw e;
                 }
             } finally {
@@ -4176,11 +4259,11 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#21215151 - DATABASEMETADATA.GETCATALOGS() FAILS TO SORT RESULTS.
-     * 
+     *
      * DatabaseMetaData.GetCatalogs() relies on the results of 'SHOW DATABASES' which deliver a sorted list of databases except for 'information_schema' which
      * is always returned in the first position.
      * This test creates set of databases around the relative position of 'information_schema' and checks the ordering of the final ResultSet.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -4194,12 +4277,12 @@ public class MetaDataRegressionTest extends BaseTestCase {
         DatabaseMetaData dbmd = this.conn.getMetaData();
         this.rs = dbmd.getCatalogs();
 
-        System.out.println("Catalogs:");
-        System.out.println("--------------------------------------------------");
-        while (this.rs.next()) {
-            System.out.println("\t" + this.rs.getString(1));
-        }
-        this.rs.beforeFirst();
+        // System.out.println("Catalogs:");
+        // System.out.println("--------------------------------------------------");
+        // while (this.rs.next()) {
+        //     System.out.println("\t" + this.rs.getString(1));
+        // }
+        // this.rs.beforeFirst();
 
         // check the relative position of each element in the result set compared to the previous element.
         String previousDb = "";
@@ -4212,25 +4295,27 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#19803348 - GETPROCEDURES() RETURNS INCORRECT O/P WHEN USEINFORMATIONSCHEMA=FALSE.
-     * 
+     *
      * Composed by two parts:
      * 1. Confirm that getProcedures() and getProcedureColumns() aren't returning more results than expected (as per reported bug).
      * 2. Confirm that the results from getProcedures() and getProcedureColumns() are in the right order (secondary bug).
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug19803348() throws Exception {
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.getProceduresReturnsFunctions.getKeyName(), "false");
-        props.setProperty("nullCatalogMeansCurrent", "false");
+        props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "false");
 
         for (boolean useIS : new boolean[] { false, true }) {
             for (boolean dbMapsToSchema : new boolean[] { false, true }) {
                 props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "" + useIS);
                 props.setProperty(PropertyKey.databaseTerm.getKeyName(), dbMapsToSchema ? DatabaseTerm.SCHEMA.name() : DatabaseTerm.CATALOG.name());
 
-                System.out.println("useIS=" + useIS + ", dbMapsToSchema=" + dbMapsToSchema);
+                String testCase = "useIS=" + useIS + ", dbMapsToSchema=" + dbMapsToSchema;
 
                 Connection conn1 = null;
                 try {
@@ -4253,34 +4338,34 @@ public class MetaDataRegressionTest extends BaseTestCase {
                     createProcedure(testDb1 + ".testBug19803348_p", "(d int) BEGIN SELECT d; END");
 
                     this.rs = dbmd.getFunctions(null, null, "testBug19803348_%");
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_f", this.rs.getString(3));
-                    assertFalse(this.rs.next());
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_f", this.rs.getString(3), testCase);
+                    assertFalse(this.rs.next(), testCase);
 
                     this.rs = dbmd.getFunctionColumns(null, null, "testBug19803348_%", "%");
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_f", this.rs.getString(3));
-                    assertEquals("", this.rs.getString(4));
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_f", this.rs.getString(3));
-                    assertEquals("d", this.rs.getString(4));
-                    assertFalse(this.rs.next());
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_f", this.rs.getString(3), testCase);
+                    assertEquals("", this.rs.getString(4), testCase);
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_f", this.rs.getString(3), testCase);
+                    assertEquals("d", this.rs.getString(4), testCase);
+                    assertFalse(this.rs.next(), testCase);
 
                     this.rs = dbmd.getProcedures(null, null, "testBug19803348_%");
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_p", this.rs.getString(3));
-                    assertFalse(this.rs.next());
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_p", this.rs.getString(3), testCase);
+                    assertFalse(this.rs.next(), testCase);
 
                     this.rs = dbmd.getProcedureColumns(null, null, "testBug19803348_%", "%");
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_p", this.rs.getString(3));
-                    assertEquals("d", this.rs.getString(4));
-                    assertFalse(this.rs.next());
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_p", this.rs.getString(3), testCase);
+                    assertEquals("d", this.rs.getString(4), testCase);
+                    assertFalse(this.rs.next(), testCase);
 
                     dropFunction(testDb1 + ".testBug19803348_f");
                     dropProcedure(testDb1 + ".testBug19803348_p");
@@ -4292,52 +4377,52 @@ public class MetaDataRegressionTest extends BaseTestCase {
                     createProcedure(testDb2 + ".testBug19803348_A_p", "(d int) BEGIN SELECT d; END");
 
                     this.rs = dbmd.getFunctions(null, null, "testBug19803348_%");
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_B_f", this.rs.getString(3));
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb2, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_A_f", this.rs.getString(3));
-                    assertFalse(this.rs.next());
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_B_f", this.rs.getString(3), testCase);
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb2, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_A_f", this.rs.getString(3), testCase);
+                    assertFalse(this.rs.next(), testCase);
 
                     this.rs = dbmd.getFunctionColumns(null, null, "testBug19803348_%", "%");
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_B_f", this.rs.getString(3));
-                    assertEquals("", this.rs.getString(4));
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_B_f", this.rs.getString(3));
-                    assertEquals("d", this.rs.getString(4));
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb2, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_A_f", this.rs.getString(3));
-                    assertEquals("", this.rs.getString(4));
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb2, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_A_f", this.rs.getString(3));
-                    assertEquals("d", this.rs.getString(4));
-                    assertFalse(this.rs.next());
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_B_f", this.rs.getString(3), testCase);
+                    assertEquals("", this.rs.getString(4), testCase);
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_B_f", this.rs.getString(3), testCase);
+                    assertEquals("d", this.rs.getString(4), testCase);
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb2, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_A_f", this.rs.getString(3), testCase);
+                    assertEquals("", this.rs.getString(4), testCase);
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb2, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_A_f", this.rs.getString(3), testCase);
+                    assertEquals("d", this.rs.getString(4), testCase);
+                    assertFalse(this.rs.next(), testCase);
 
                     this.rs = dbmd.getProcedures(null, null, "testBug19803348_%");
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_B_p", this.rs.getString(3));
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb2, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_A_p", this.rs.getString(3));
-                    assertFalse(this.rs.next());
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_B_p", this.rs.getString(3), testCase);
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb2, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_A_p", this.rs.getString(3), testCase);
+                    assertFalse(this.rs.next(), testCase);
 
                     this.rs = dbmd.getProcedureColumns(null, null, "testBug19803348_%", "%");
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_B_p", this.rs.getString(3));
-                    assertEquals("d", this.rs.getString(4));
-                    assertTrue(this.rs.next());
-                    assertEquals(testDb2, this.rs.getString(dbMapsToSchema ? 2 : 1));
-                    assertEquals("testBug19803348_A_p", this.rs.getString(3));
-                    assertEquals("d", this.rs.getString(4));
-                    assertFalse(this.rs.next());
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb1, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_B_p", this.rs.getString(3), testCase);
+                    assertEquals("d", this.rs.getString(4), testCase);
+                    assertTrue(this.rs.next(), testCase);
+                    assertEquals(testDb2, this.rs.getString(dbMapsToSchema ? 2 : 1), testCase);
+                    assertEquals("testBug19803348_A_p", this.rs.getString(3), testCase);
+                    assertEquals("d", this.rs.getString(4), testCase);
+                    assertFalse(this.rs.next(), testCase);
 
                 } finally {
                     if (conn1 != null) {
@@ -4350,7 +4435,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#20727196 - GETPROCEDURECOLUMNS() RETURNS EXCEPTION FOR FUNCTION WHICH RETURNS ENUM/SET TYPE.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -4362,12 +4447,17 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 "(p ENUM ('Yes', 'No')) RETURNS ENUM ('Yes', 'No') DETERMINISTIC BEGIN RETURN IF(p='Yes', 'Yes', if(p='No', 'No', '?')); END");
         createProcedure("testBug20727196_p1", "(p ENUM ('Yes', 'No')) BEGIN SELECT IF(p='Yes', 'Yay!', if(p='No', 'Ney!', 'What?')); END");
 
-        for (String connProps : new String[] { "nullCatalogMeansCurrent=true,getProceduresReturnsFunctions=false,useInformationSchema=false",
-                "nullCatalogMeansCurrent=true,getProceduresReturnsFunctions=false,useInformationSchema=true" }) {
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "true");
+        props.setProperty(PropertyKey.getProceduresReturnsFunctions.getKeyName(), "false");
+        for (boolean useInformationSchema : new boolean[] { false, true }) {
+            props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "" + useInformationSchema);
 
             Connection testConn = null;
             try {
-                testConn = getConnectionWithProps(connProps);
+                testConn = getConnectionWithProps(props);
                 DatabaseMetaData dbmd = testConn.getMetaData();
 
                 this.rs = dbmd.getFunctionColumns(null, null, "testBug20727196_%", "%");
@@ -4423,7 +4513,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#76187 (20675539), getTypeInfo report maximum precision of 255 for varchar.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -4443,7 +4533,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#21978216, GETTYPEINFO REPORT MAXIMUM PRECISION OF 255 FOR VARBINARY
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -4463,7 +4553,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#23212347, ALL API CALLS ON RESULTSET METADATA RESULTS IN NPE WHEN USESERVERPREPSTMTS=TRUE.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -4475,7 +4565,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
             Properties props = new Properties();
             props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), Boolean.toString(useSPS));
-            props.setProperty(PropertyKey.useSSL.getKeyName(), "false");
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
             props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
 
             Connection testConn = getConnectionWithProps(props);
@@ -4503,7 +4593,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#73775 - DBMD.getProcedureColumns()/.getFunctionColumns() fail to filter by columnPattern
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -4519,6 +4609,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
                     dbMapsToSchema ? "Y" : "N");
 
             final Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
             props.setProperty(PropertyKey.useInformationSchema.getKeyName(), Boolean.toString(useIS));
             props.setProperty(PropertyKey.getProceduresReturnsFunctions.getKeyName(), Boolean.toString(inclFuncs));
             props.setProperty(PropertyKey.databaseTerm.getKeyName(), dbMapsToSchema ? DatabaseTerm.SCHEMA.name() : DatabaseTerm.CATALOG.name());
@@ -4645,7 +4737,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#87826 (26846249), MYSQL JDBC CONNECTOR/J DATABASEMETADATA NULL PATTERN HANDLING IS NON-COMPLIANT.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -4654,6 +4746,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
         createProcedure("bug87826", "(in param1 int, out result varchar(197)) BEGIN select 1, ''; END");
 
         final Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.nullDatabaseMeansCurrent.getKeyName(), "true");
 
         for (String useIS : new String[] { "false", "true" }) {
@@ -4688,7 +4782,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#90887 (28034570), DATABASEMETADATAUSINGINFOSCHEMA#GETTABLES FAILS IF METHOD ARGUMENTS ARE NULL.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -4696,6 +4790,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
         List<String> resNames = new ArrayList<>();
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "false");
         Connection con = getConnectionWithProps(props);
         DatabaseMetaData metaData = con.getMetaData();
@@ -4719,7 +4815,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#29186870, CONNECTOR/J REGRESSION: NOT RETURNING PRECISION GETPROCEDURECOLUMNS.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -4778,6 +4874,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
         String fname = "testBug29186870func";
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
 
         try {
             for (String useIS : new String[] { "false", "true" }) {
@@ -4866,7 +4964,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#97413 (30477722), DATABASEMETADATA IS BROKEN AFTER SERVER WL#13528.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -4900,7 +4998,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 } else if (warn.getMessage().startsWith("UNSIGNED for decimal and floating point data types is deprecated")) {
                     cnt4++;
                 } else {
-                    System.out.println(warn.getMessage());
+                    fail("Not expected warning: " + warn.getMessage());
                 }
                 warn = warn.getNextWarning();
             }
@@ -4942,7 +5040,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
                         String errMsg = "useIS=" + useIS + ", useSSPS=" + useSSPS + ", tinyInt1isBit=" + tinyInt1isBit + ", transformedBitIsBoolean="
                                 + transformedBitIsBoolean + "\n";
                         props.clear();
-                        props.setProperty(PropertyKey.useSSL.getKeyName(), "false");
+                        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
                         props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
                         props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "" + useIS);
                         props.setProperty(PropertyKey.useServerPrepStmts.getKeyName(), "" + useSSPS);
@@ -4980,8 +5078,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
                         /*
                          * Functions
                          */
-                        storedProc = c1.prepareCall("{call testBug97413f(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                                + " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}");
+                        storedProc = c1.prepareCall("{? = call testBug97413f(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+                                + " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}");
                         pm = storedProc.getParameterMetaData();
                         TestBug97413Columns testBug97413Columns = new TestBug97413Columns(errMsg, tinyInt1isBit, transformedBitIsBoolean, pm);
                         testBug97413Columns.testBug97413CheckMDColumn(Types.INTEGER, "INT", 0, 10, 0); // return type
@@ -5001,6 +5099,7 @@ public class MetaDataRegressionTest extends BaseTestCase {
     }
 
     private class TestBug97413Columns {
+
         String errMsg = null;
         boolean tinyInt1isBit = false;
         boolean transformedBitIsBoolean = false;
@@ -5065,16 +5164,15 @@ public class MetaDataRegressionTest extends BaseTestCase {
                 assertEquals(decimalDigits, this.rm.getScale(this.id), this.errMsg);
                 assertEquals(precision, this.rm.getColumnDisplaySize(this.id), this.errMsg);
             }
-
         }
 
         void run() throws Exception {
             testBug97413CheckMDColumn(Types.TINYINT, "TINYINT", 3, 3, 0);
             testBug97413CheckMDColumn(Types.TINYINT, "TINYINT UNSIGNED", 3, 3, 0);
 
-            testBug97413CheckMDColumn(this.tinyInt1isBit ? (this.transformedBitIsBoolean ? Types.BOOLEAN : Types.BIT) : Types.TINYINT,
-                    this.tinyInt1isBit ? (this.transformedBitIsBoolean ? "BOOLEAN" : "BIT") : "TINYINT",
-                    this.tinyInt1isBit ? (this.transformedBitIsBoolean ? 3 : 1) : 3, this.tinyInt1isBit ? (this.transformedBitIsBoolean ? 3 : 1) : 3, 0);
+            testBug97413CheckMDColumn(this.tinyInt1isBit ? this.transformedBitIsBoolean ? Types.BOOLEAN : Types.BIT : Types.TINYINT,
+                    this.tinyInt1isBit ? this.transformedBitIsBoolean ? "BOOLEAN" : "BIT" : "TINYINT",
+                    this.tinyInt1isBit ? this.transformedBitIsBoolean ? 3 : 1 : 3, this.tinyInt1isBit ? this.transformedBitIsBoolean ? 3 : 1 : 3, 0);
             testBug97413CheckMDColumn(Types.TINYINT, "TINYINT UNSIGNED", 3, 3, 0);
             testBug97413CheckMDColumn(Types.TINYINT, "TINYINT UNSIGNED", 3, 3, 0);
             testBug97413CheckMDColumn(Types.TINYINT, "TINYINT UNSIGNED", 3, 3, 0);
@@ -5132,11 +5230,12 @@ public class MetaDataRegressionTest extends BaseTestCase {
             testBug97413CheckMDColumn(Types.DOUBLE, "DOUBLE UNSIGNED", 12, 12, 10);
             testBug97413CheckMDColumn(Types.DOUBLE, "DOUBLE UNSIGNED", 12, 12, 10);
         }
+
     }
 
     /**
      * Tests fix for Bug#102076 (32329915), CONTRIBUTION: MYSQL JDBC DRIVER RESULTSET.GETLONG() THROWS NUMBEROUTOFRANGE.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -5159,12 +5258,11 @@ public class MetaDataRegressionTest extends BaseTestCase {
             assertEquals(Integer.MAX_VALUE, this.rs.getLong(9)); // LENGTH
             assertEquals(Integer.MAX_VALUE, this.rs.getLong(14)); // CHAR_OCTET_LENGTH
         } while (this.rs.next());
-
     }
 
     /**
      * Tests fix for Bug#95280 (29757140), DATABASEMETADATA.GETIMPORTEDKEYS RETURNS DOUBLE THE ROWS.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -5186,6 +5284,8 @@ public class MetaDataRegressionTest extends BaseTestCase {
                         + " FOREIGN KEY fk_cat(cat_id) REFERENCES table1(cat_id) ON UPDATE CASCADE ON DELETE RESTRICT) ENGINE=InnoDB;");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         for (boolean useIS : new boolean[] { false, true }) {
             for (String databaseTerm : new String[] { "CATALOG", "SCHEMA" }) {
                 props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "" + useIS);
@@ -5205,4 +5305,277 @@ public class MetaDataRegressionTest extends BaseTestCase {
             }
         }
     }
+
+    /**
+     * Tests fix for Bug#104641 (33237255), DatabaseMetaData.getImportedKeys can return duplicated foreign keys.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug104641() throws Exception {
+        String databaseName1 = "dbBug104641";
+        if (isServerRunningOnWindows()) {
+            databaseName1 = databaseName1.toLowerCase();
+        }
+        createDatabase(databaseName1);
+        createTable(databaseName1 + ".table1",
+                "(`CREATED` datetime DEFAULT NULL,`ID` bigint NOT NULL AUTO_INCREMENT,`LRN_ID` bigint DEFAULT '0',`USERNAME` varchar(50) NOT NULL,"
+                        + "PRIMARY KEY (`ID`),UNIQUE KEY `U_table1_LRN_ID` (`LRN_ID`),UNIQUE KEY `U_table1_USERNAME` (`USERNAME`) )");
+        createTable(databaseName1 + ".table2",
+                "(`AL_ID` varchar(50) DEFAULT NULL,`CREATED` datetime DEFAULT NULL,`ID` bigint NOT NULL AUTO_INCREMENT,`USER_ID` bigint DEFAULT NULL,"
+                        + "PRIMARY KEY (`ID`),KEY `fk_table2_user_id` (`USER_ID`),KEY `index_al_id1` (`AL_ID`),"
+                        + "CONSTRAINT `fk_table2_user_id` FOREIGN KEY (`USER_ID`) REFERENCES `table1` (`ID`) )");
+        createTable(databaseName1 + ".table3",
+                "(`AL_ID` varchar(50) DEFAULT NULL,`ID` bigint NOT NULL AUTO_INCREMENT,`USER_ID` bigint DEFAULT NULL,`LRN_ID` bigint DEFAULT '0',"
+                        + "PRIMARY KEY (`ID`),KEY `fk_table3_LRN_ID` (`LRN_ID`),KEY `index_al_id2` (`AL_ID`),"
+                        + "CONSTRAINT `fk_table3_LRN_ID` FOREIGN KEY `U_table1_LRN_ID` (`LRN_ID`) REFERENCES `table1` (`LRN_ID`) )");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        for (boolean useIS : new boolean[] { false, true }) {
+            for (String databaseTerm : new String[] { "CATALOG", "SCHEMA" }) {
+                props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "" + useIS);
+                props.setProperty(PropertyKey.databaseTerm.getKeyName(), databaseTerm);
+
+                boolean dbTermIsSchema = databaseTerm.contentEquals("SCHEMA");
+
+                String err = "useInformationSchema=" + useIS + ", databaseTerm=" + databaseTerm;
+                Connection con = getConnectionWithProps(props);
+                DatabaseMetaData meta = con.getMetaData();
+
+                this.rs = dbTermIsSchema ? meta.getImportedKeys(null, databaseName1, "table2") : meta.getImportedKeys(databaseName1, null, "table2");
+                assertTrue(this.rs.next(), err);
+                assertEquals(dbTermIsSchema ? "def" : databaseName1, this.rs.getString("PKTABLE_CAT"), err);
+                assertEquals(dbTermIsSchema ? databaseName1 : null, this.rs.getString("PKTABLE_SCHEM"), err);
+                assertEquals(dbTermIsSchema ? "def" : databaseName1, this.rs.getString("FKTABLE_CAT"), err);
+                assertEquals(dbTermIsSchema ? databaseName1 : null, this.rs.getString("FKTABLE_SCHEM"), err);
+                assertEquals("table1", this.rs.getString("PKTABLE_NAME"), err);
+                assertEquals("ID", this.rs.getString("PKCOLUMN_NAME"), err);
+                assertEquals("table2", this.rs.getString("FKTABLE_NAME"), err);
+                assertEquals("USER_ID", this.rs.getString("FKCOLUMN_NAME"), err);
+                assertEquals(1, this.rs.getInt("KEY_SEQ"), err);
+                assertEquals(1, this.rs.getInt("UPDATE_RULE"), err);
+                assertEquals(1, this.rs.getInt("DELETE_RULE"), err);
+                assertEquals("fk_table2_user_id", this.rs.getString("FK_NAME"), err);
+                assertEquals(useIS ? "PRIMARY" : null, this.rs.getString("PK_NAME"), err);
+                assertEquals(7, this.rs.getInt("DEFERRABILITY"), err);
+                assertFalse(this.rs.next(), err);
+
+                this.rs = dbTermIsSchema ? meta.getImportedKeys(null, databaseName1, "table3") : meta.getImportedKeys(databaseName1, null, "table3");
+                assertTrue(this.rs.next(), err);
+                assertEquals(dbTermIsSchema ? "def" : databaseName1, this.rs.getString("PKTABLE_CAT"), err);
+                assertEquals(dbTermIsSchema ? databaseName1 : null, this.rs.getString("PKTABLE_SCHEM"), err);
+                assertEquals(dbTermIsSchema ? "def" : databaseName1, this.rs.getString("FKTABLE_CAT"), err);
+                assertEquals(dbTermIsSchema ? databaseName1 : null, this.rs.getString("FKTABLE_SCHEM"), err);
+                assertEquals("table1", this.rs.getString("PKTABLE_NAME"), err);
+                assertEquals("LRN_ID", this.rs.getString("PKCOLUMN_NAME"), err);
+                assertEquals("table3", this.rs.getString("FKTABLE_NAME"), err);
+                assertEquals("LRN_ID", this.rs.getString("FKCOLUMN_NAME"), err);
+                assertEquals(1, this.rs.getInt("KEY_SEQ"), err);
+                assertEquals(1, this.rs.getInt("UPDATE_RULE"), err);
+                assertEquals(1, this.rs.getInt("DELETE_RULE"), err);
+                assertEquals("fk_table3_LRN_ID", this.rs.getString("FK_NAME"), err);
+                assertEquals(useIS ? "U_table1_LRN_ID" : null, this.rs.getString("PK_NAME"), err);
+                assertEquals(7, this.rs.getInt("DEFERRABILITY"), err);
+                assertFalse(this.rs.next(), err);
+
+                con.close();
+            }
+        }
+    }
+
+    /**
+     * Tests fix for Bug#33723611, getDefaultTransactionIsolation must return repeatable read.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug33723611() throws Exception {
+        this.rs = this.stmt.executeQuery(versionMeetsMinimum(5, 7) ? "SELECT @@SESSION.transaction_isolation" : "SELECT @@SESSION.tx_isolation");
+        assertTrue(this.rs.next());
+        assertEquals("REPEATABLE-READ", this.rs.getString(1));
+
+        assertEquals(Connection.TRANSACTION_REPEATABLE_READ, this.conn.getTransactionIsolation());
+
+        DatabaseMetaData dbmd = this.conn.getMetaData();
+        assertEquals(Connection.TRANSACTION_REPEATABLE_READ, dbmd.getDefaultTransactionIsolation());
+    }
+
+    /**
+     * Tests fix for Bug#82084 (23743938), YEAR DATA TYPE RETURNS INCORRECT VALUE FOR JDBC GETCOLUMNTYPE().
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug82084() throws Exception {
+        createProcedure("testBug82084p", "(in param1 int, out result year) BEGIN select 1, ''; END");
+        createTable("testBug82084", "(col_tiny SMALLINT, col_year year, col_date date)");
+        this.stmt.executeUpdate("INSERT INTO testBug82084 VALUES(1,2006, '2006-01-01')");
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+
+        for (boolean useIS : new Boolean[] { true, false }) {
+            for (boolean yearIsDate : new Boolean[] { true, false }) {
+                props.setProperty(PropertyKey.yearIsDateType.getKeyName(), "" + yearIsDate);
+                props.setProperty(PropertyKey.useInformationSchema.getKeyName(), "" + useIS);
+                Connection con = getConnectionWithProps(props);
+
+                DatabaseMetaData dbmd = con.getMetaData();
+                this.rs = dbmd.getColumns(null, null, "testBug82084", "%year");
+                assertTrue(this.rs.next());
+                assertEquals(MysqlType.YEAR.getName(), this.rs.getString("TYPE_NAME"));
+                assertEquals(yearIsDate ? Types.DATE : Types.SMALLINT, this.rs.getInt("DATA_TYPE"));
+
+                this.rs = dbmd.getTypeInfo();
+                while (this.rs.next()) {
+                    if (this.rs.getString("TYPE_NAME").equals("YEAR")) {
+                        assertEquals(yearIsDate ? Types.DATE : Types.SMALLINT, this.rs.getInt("DATA_TYPE"));
+                        break;
+                    }
+                }
+
+                ResultSet procMD = con.getMetaData().getProcedureColumns(null, null, "testBug82084p", "%result");
+                assertTrue(procMD.next());
+                assertEquals(MysqlType.YEAR.getName(), procMD.getString("TYPE_NAME"));
+                assertEquals(yearIsDate ? Types.DATE : Types.SMALLINT, procMD.getInt("DATA_TYPE"));
+
+                this.rs = con.createStatement().executeQuery("select * from testBug82084");
+                ResultSetMetaData rsmd = this.rs.getMetaData();
+
+                assertEquals(MysqlType.YEAR.getName(), rsmd.getColumnTypeName(2));
+                if (yearIsDate) {
+                    assertEquals(Types.DATE, rsmd.getColumnType(2));
+                    assertEquals(java.sql.Date.class.getName(), rsmd.getColumnClassName(2));
+                } else {
+                    assertEquals(Types.SMALLINT, rsmd.getColumnType(2));
+                    assertEquals(Short.class.getName(), rsmd.getColumnClassName(2));
+                }
+
+                con.close();
+            }
+        }
+    }
+
+    /**
+     * Tests fix for Bug#106758 (33973048), DatabaseMetaData.getTypeInfo returns AUTO_INCREMENT = false for all datatypes.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBug106758() throws Exception {
+        DatabaseMetaData dbmd = this.conn.getMetaData();
+
+        this.rs = dbmd.getTypeInfo();
+        while (this.rs.next()) {
+            StringBuilder sb = new StringBuilder("CREATE TEMPORARY TABLE testBug106758 (col ");
+            sb.append(this.rs.getString("TYPE_NAME"));
+            if (this.rs.getString("CREATE_PARAMS").startsWith("(M)")) {
+                sb.append("(5)");
+            } else if (this.rs.getString("CREATE_PARAMS").startsWith("('value")) {
+                sb.append(" ('value')");
+            }
+            sb.append(" AUTO_INCREMENT PRIMARY KEY)"); // Some types don't support primary keys like this, however, the query fails due to AUTO_INCREMENT first.
+
+            if (this.rs.getBoolean("AUTO_INCREMENT")) {
+                try {
+                    this.stmt.execute(sb.toString());
+                } catch (SQLException e) {
+                    fail("Type " + this.rs.getString("TYPE_NAME") + " does not support AUTO_INCREMENT.");
+                } finally {
+                    this.stmt.execute("DROP TABLE IF EXISTS testBug106758");
+                }
+            } else {
+                assertThrows("Type " + this.rs.getString("TYPE_NAME") + " supports AUTO_INCREMENT.", SQLException.class,
+                        "Incorrect column specifier for column 'col'", () -> {
+                            this.stmt.execute(sb.toString());
+                            this.stmt.execute("DROP TABLE IF EXISTS testBug106758");
+                            return null;
+                        });
+            }
+        }
+    }
+
+    /**
+     * Tests fix for Bug#109807 (Bug#35021014), DatabaseMetaData#getTypeInfo should ordered by DATA_TYPE.
+     *
+     * @throws Exception
+     */
+    @Test
+    void testBug109807() throws Exception {
+        boolean useIS = false;
+        boolean yearDT = false;
+        do {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.useInformationSchema.getKeyName(), Boolean.toString(useIS));
+            props.setProperty(PropertyKey.yearIsDateType.getKeyName(), Boolean.toString(yearDT));
+            Connection testConn = getConnectionWithProps(props);
+            DatabaseMetaData testDbMD = testConn.getMetaData();
+            this.rs = testDbMD.getTypeInfo();
+            int prevDataType = Integer.MIN_VALUE;
+            while (this.rs.next()) {
+                assertTrue(prevDataType <= this.rs.getInt("DATA_TYPE"), "DatabaseMetaData#getTypeInfo must be ordered ascending by DATA_TYPE");
+                prevDataType = this.rs.getInt("DATA_TYPE");
+            }
+            testConn.close();
+        } while ((useIS = !useIS) || (yearDT = !yearDT));
+    }
+
+    /**
+     * Tests fix for Bug#109808 (Bug#35021038), DatabaseMetaData#getPrimaryKeys should ordered by COLUMN_NAME.
+     *
+     * @throws Exception
+     */
+    @Test
+    void testBug109808() throws Exception {
+        createTable("testBug109808",
+                "(col_A INT NOT NULL, col_b INT NOT NULL, col_C VARCHAR(100) NOT NULL, col_D TIMESTAMP, PRIMARY KEY(col_b, col_C, col_A))");
+        boolean useIS = false;
+        do {
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.useInformationSchema.getKeyName(), Boolean.toString(useIS));
+            Connection testConn = getConnectionWithProps(props);
+            DatabaseMetaData dbmd = testConn.getMetaData();
+            this.rs = dbmd.getPrimaryKeys(null, null, "testBug109808");
+            assertTrue(this.rs.next());
+            assertEquals("col_A", this.rs.getString("COLUMN_NAME"));
+            assertTrue(this.rs.next());
+            assertEquals("col_b", this.rs.getString("COLUMN_NAME"));
+            assertTrue(this.rs.next());
+            assertEquals("col_C", this.rs.getString("COLUMN_NAME"));
+            assertFalse(this.rs.next());
+        } while (useIS = !useIS);
+    }
+
+    /**
+     * Tests fix for Bug#96582 (Bug#30222032), jdbc.MysqlParameterMetadata#isNullable doesnt check whether to be simple.
+     *
+     * @throws Exception
+     */
+    @Test
+    void testBug96582() throws Exception {
+        Properties connectionProps = new Properties();
+        connectionProps.put(PropertyKey.generateSimpleParameterMetadata.getKeyName(), "true");
+        connectionProps.put(PropertyKey.useServerPrepStmts.getKeyName(), "false");
+        Connection con = this.getConnectionWithProps(connectionProps);
+        createTable("testBug96582", "(c1 INT NOT NULL, c2 INT)");
+        this.pstmt = con.prepareStatement("INSERT INTO testBug96582(c1, c2) VALUES(?, ?)");
+        this.pstmt.setInt(1, 1);
+        this.pstmt.setInt(2, 2);
+        assertEquals(ParameterMetaData.parameterNullableUnknown, this.pstmt.getParameterMetaData().isNullable(1));
+        assertEquals(ParameterMetaData.parameterNullableUnknown, this.pstmt.getParameterMetaData().isNullable(2));
+
+        con.close();
+
+        connectionProps.put(PropertyKey.useServerPrepStmts.getKeyName(), "true");
+        con = this.getConnectionWithProps(connectionProps);
+        createTable("testBug96582", "(c1 INT NOT NULL, c2 INT)");
+        this.pstmt = con.prepareStatement("INSERT INTO testBug96582(c1, c2) VALUES(?, ?)");
+        this.pstmt.setInt(1, 1);
+        this.pstmt.setInt(2, 2);
+        assertEquals(ParameterMetaData.parameterNullable, this.pstmt.getParameterMetaData().isNullable(1));
+        assertEquals(ParameterMetaData.parameterNullable, this.pstmt.getParameterMetaData().isNullable(2));
+    }
+
 }

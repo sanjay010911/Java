@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2012, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -33,16 +33,17 @@ import java.util.Set;
 
 import com.mysql.cj.util.LRUCache;
 
-public class PerConnectionLRUFactory implements CacheAdapterFactory<String, ParseInfo> {
+public class PerConnectionLRUFactory implements CacheAdapterFactory<String, QueryInfo> {
 
-    public CacheAdapter<String, ParseInfo> getInstance(Object syncMutex, String url, int cacheMaxSize, int maxKeySize) {
-
+    @Override
+    public CacheAdapter<String, QueryInfo> getInstance(Object syncMutex, String url, int cacheMaxSize, int maxKeySize) {
         return new PerConnectionLRU(syncMutex, cacheMaxSize, maxKeySize);
     }
 
-    class PerConnectionLRU implements CacheAdapter<String, ParseInfo> {
+    class PerConnectionLRU implements CacheAdapter<String, QueryInfo> {
+
         private final int cacheSqlLimit;
-        private final LRUCache<String, ParseInfo> cache;
+        private final LRUCache<String, QueryInfo> cache;
         private final Object syncMutex;
 
         protected PerConnectionLRU(Object syncMutex, int cacheMaxSize, int maxKeySize) {
@@ -52,7 +53,8 @@ public class PerConnectionLRUFactory implements CacheAdapterFactory<String, Pars
             this.syncMutex = syncMutex;
         }
 
-        public ParseInfo get(String key) {
+        @Override
+        public QueryInfo get(String key) {
             if (key == null || key.length() > this.cacheSqlLimit) {
                 return null;
             }
@@ -62,7 +64,8 @@ public class PerConnectionLRUFactory implements CacheAdapterFactory<String, Pars
             }
         }
 
-        public void put(String key, ParseInfo value) {
+        @Override
+        public void put(String key, QueryInfo value) {
             if (key == null || key.length() > this.cacheSqlLimit) {
                 return;
             }
@@ -72,25 +75,29 @@ public class PerConnectionLRUFactory implements CacheAdapterFactory<String, Pars
             }
         }
 
+        @Override
         public void invalidate(String key) {
             synchronized (this.syncMutex) {
                 this.cache.remove(key);
             }
         }
 
+        @Override
         public void invalidateAll(Set<String> keys) {
             synchronized (this.syncMutex) {
                 for (String key : keys) {
                     this.cache.remove(key);
                 }
             }
-
         }
 
+        @Override
         public void invalidateAll() {
             synchronized (this.syncMutex) {
                 this.cache.clear();
             }
         }
+
     }
+
 }

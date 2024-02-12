@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -34,6 +34,7 @@ import java.sql.SQLException;
 import com.mysql.cj.jdbc.JdbcConnection;
 
 public interface ReplicationConnection extends JdbcConnection {
+
     public long getConnectionGroupId();
 
     public JdbcConnection getCurrentConnection();
@@ -42,7 +43,7 @@ public interface ReplicationConnection extends JdbcConnection {
 
     /**
      * Use {@link #getSourceConnection()} instead.
-     * 
+     *
      * @return {@link JdbcConnection}
      * @deprecated
      */
@@ -55,10 +56,11 @@ public interface ReplicationConnection extends JdbcConnection {
 
     /**
      * Use {@link #promoteReplicaToSource(String)} instead.
-     * 
+     *
      * @param host
      *            host name
      * @throws SQLException
+     *             in case of failure
      * @deprecated
      */
     @Deprecated
@@ -70,10 +72,11 @@ public interface ReplicationConnection extends JdbcConnection {
 
     /**
      * Use {@link #removeSourceHost(String)} instead.
-     * 
+     *
      * @param host
      *            host name
      * @throws SQLException
+     *             in case of failure
      * @deprecated
      */
     @Deprecated
@@ -85,12 +88,13 @@ public interface ReplicationConnection extends JdbcConnection {
 
     /**
      * Use {@link #removeSourceHost(String, boolean)} instead.
-     * 
+     *
      * @param host
      *            host name
      * @param waitUntilNotInUse
      *            remove immediately or wait for it's release
      * @throws SQLException
+     *             in case of failure
      * @deprecated
      */
     @Deprecated
@@ -102,7 +106,7 @@ public interface ReplicationConnection extends JdbcConnection {
 
     /**
      * Use {@link #isHostSource(String)} instead.
-     * 
+     *
      * @param host
      *            host name
      * @return true if it's a source host
@@ -117,7 +121,7 @@ public interface ReplicationConnection extends JdbcConnection {
 
     /**
      * Use {@link #getReplicaConnection()} instead.
-     * 
+     *
      * @return {@link JdbcConnection}
      * @deprecated
      */
@@ -130,10 +134,11 @@ public interface ReplicationConnection extends JdbcConnection {
 
     /**
      * Use {@link #addReplicaHost(String)} instead.
-     * 
+     *
      * @param host
      *            host name
      * @throws SQLException
+     *             in case of failure
      * @deprecated
      */
     @Deprecated
@@ -145,10 +150,11 @@ public interface ReplicationConnection extends JdbcConnection {
 
     /**
      * Use {@link #removeReplica(String)} instead.
-     * 
+     *
      * @param host
      *            host name
      * @throws SQLException
+     *             in case of failure
      * @deprecated
      */
     @Deprecated
@@ -160,12 +166,13 @@ public interface ReplicationConnection extends JdbcConnection {
 
     /**
      * Use {@link #removeReplica(String, boolean)} instead.
-     * 
+     *
      * @param host
      *            host name
      * @param closeGently
      *            mode
      * @throws SQLException
+     *             in case of failure
      * @deprecated
      */
     @Deprecated
@@ -177,7 +184,7 @@ public interface ReplicationConnection extends JdbcConnection {
 
     /**
      * Use {@link #isHostReplica(String)} instead.
-     * 
+     *
      * @param host
      *            host name
      * @return true if it's a replica
@@ -187,4 +194,5 @@ public interface ReplicationConnection extends JdbcConnection {
     default public boolean isHostSlave(String host) {
         return isHostReplica(host);
     }
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -39,6 +39,7 @@ import java.sql.NClob;
 import java.sql.SQLException;
 import java.sql.SQLType;
 import java.sql.SQLXML;
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -48,7 +49,6 @@ import java.util.TreeMap;
 
 import com.mysql.cj.Messages;
 import com.mysql.cj.MysqlType;
-import com.mysql.cj.PreparedQuery;
 import com.mysql.cj.conf.PropertyDefinitions.DatabaseTerm;
 import com.mysql.cj.conf.PropertyKey;
 import com.mysql.cj.exceptions.AssertionFailedException;
@@ -58,7 +58,6 @@ import com.mysql.cj.exceptions.MysqlErrorNumbers;
 import com.mysql.cj.jdbc.ClientPreparedStatement;
 import com.mysql.cj.jdbc.JdbcConnection;
 import com.mysql.cj.jdbc.MysqlSQLXML;
-import com.mysql.cj.jdbc.ServerPreparedStatement;
 import com.mysql.cj.jdbc.StatementImpl;
 import com.mysql.cj.jdbc.exceptions.NotUpdatable;
 import com.mysql.cj.jdbc.exceptions.SQLError;
@@ -74,6 +73,7 @@ import com.mysql.cj.util.StringUtils;
  * A result set that is updatable.
  */
 public class UpdatableResultSet extends ResultSetImpl {
+
     /** Marker for 'stream' data when doing INSERT rows */
     final static byte[] STREAM_DATA_MARKER = StringUtils.getBytes("** STREAM DATA **");
 
@@ -99,7 +99,7 @@ public class UpdatableResultSet extends ResultSetImpl {
     private String notUpdatableReason = null;
 
     /** List of primary keys */
-    private List<Integer> primaryKeyIndicies = null;
+    private List<Integer> primaryKeyIndices = null;
 
     private String qualifiedAndQuotedTableName;
 
@@ -134,14 +134,14 @@ public class UpdatableResultSet extends ResultSetImpl {
 
     /**
      * Creates a new ResultSet object.
-     * 
+     *
      * @param tuples
      *            actual row data
      * @param conn
      *            the Connection that created us.
      * @param creatorStmt
      *            statement owning this result set
-     * 
+     *
      * @throws SQLException
      *             if an error occurs
      */
@@ -207,7 +207,7 @@ public class UpdatableResultSet extends ResultSetImpl {
 
     /**
      * Is this ResultSet updatable?
-     * 
+     *
      * @throws SQLException
      *             if an error occurs
      */
@@ -228,10 +228,10 @@ public class UpdatableResultSet extends ResultSetImpl {
             Field[] fields = this.getMetadata().getFields();
             // We can only do this if we know that there is a currently selected database, or if we're talking to a > 4.1 version of MySQL server (as it returns
             // database names in field info)
-            if ((this.db == null) || (this.db.length() == 0)) {
+            if (this.db == null || this.db.length() == 0) {
                 this.db = fields[0].getDatabaseName();
 
-                if ((this.db == null) || (this.db.length() == 0)) {
+                if (this.db == null || this.db.length() == 0) {
                     throw SQLError.createSQLException(Messages.getString("UpdatableResultSet.43"), MysqlErrorNumbers.SQL_STATE_ILLEGAL_ARGUMENT,
                             getExceptionInterceptor());
                 }
@@ -284,7 +284,7 @@ public class UpdatableResultSet extends ResultSetImpl {
                     }
 
                     // Can't reference more than one database
-                    if ((dbName == null) || !dbName.equals(otherDbName)) {
+                    if (dbName == null || !dbName.equals(otherDbName)) {
                         this.isUpdatable = false;
                         this.notUpdatableReason = Messages.getString("NotUpdatableReason.1");
 
@@ -419,9 +419,9 @@ public class UpdatableResultSet extends ResultSetImpl {
 
             this.deleter.clearParameters();
 
-            int numKeys = this.primaryKeyIndicies.size();
+            int numKeys = this.primaryKeyIndices.size();
             for (int i = 0; i < numKeys; i++) {
-                int index = this.primaryKeyIndicies.get(i).intValue();
+                int index = this.primaryKeyIndices.get(i).intValue();
                 this.setParamValue(this.deleter, i + 1, this.thisRow, index, this.getMetadata().getFields()[index]);
             }
 
@@ -449,10 +449,10 @@ public class UpdatableResultSet extends ResultSetImpl {
             case MEDIUMINT:
             case MEDIUMINT_UNSIGNED:
             case INT:
-            case INT_UNSIGNED:
             case YEAR:
                 ps.setInt(psIdx, getInt(rsIdx + 1));
                 break;
+            case INT_UNSIGNED:
             case BIGINT:
                 ps.setLong(psIdx, getLong(rsIdx + 1));
                 break;
@@ -476,15 +476,16 @@ public class UpdatableResultSet extends ResultSetImpl {
                 ps.setDate(psIdx, getDate(rsIdx + 1));
                 break;
             case TIMESTAMP:
-                ((PreparedQuery<?>) ps.getQuery()).getQueryBindings().bindTimestamp(ps.getCoreParameterIndex(psIdx), getTimestamp(rsIdx + 1), null,
-                        field.getDecimals(), MysqlType.TIMESTAMP);
+                ps.setObject(psIdx, getObject(rsIdx + 1, Timestamp.class), MysqlType.TIMESTAMP, field.getDecimals());
+                ps.getQueryBindings().getBinding(psIdx - 1, false).setKeepOrigNanos(true);
                 break;
             case DATETIME:
                 ps.setObject(psIdx, getObject(rsIdx + 1, LocalDateTime.class), MysqlType.DATETIME, field.getDecimals());
+                ps.getQueryBindings().getBinding(psIdx - 1, false).setKeepOrigNanos(true);
                 break;
             case TIME:
-                // TODO adjust nanos to decimal numbers
                 ps.setTime(psIdx, getTime(rsIdx + 1));
+                ps.getQueryBindings().getBinding(psIdx - 1, false).setKeepOrigNanos(true);
                 break;
             case DOUBLE:
             case DOUBLE_UNSIGNED:
@@ -492,7 +493,7 @@ public class UpdatableResultSet extends ResultSetImpl {
             case FLOAT_UNSIGNED:
             case BOOLEAN:
             case BIT:
-                ps.setBytesNoEscapeNoQuotes(psIdx, val);
+                ps.setBytes(psIdx, val, false);
                 break;
             /*
              * default, but also explicitly for following types:
@@ -503,7 +504,6 @@ public class UpdatableResultSet extends ResultSetImpl {
                 ps.setBytes(psIdx, val);
                 break;
         }
-
     }
 
     private void extractDefaultValues() throws SQLException {
@@ -556,7 +556,7 @@ public class UpdatableResultSet extends ResultSetImpl {
     /**
      * Figure out whether or not this ResultSet is updatable, and if so,
      * generate the PreparedStatements to support updates.
-     * 
+     *
      * @throws SQLException
      *             if an error occurs
      * @throws NotUpdatable
@@ -582,7 +582,7 @@ public class UpdatableResultSet extends ResultSetImpl {
             this.databasesUsedToTablesUsed = new TreeMap<>();
         }
 
-        this.primaryKeyIndicies = new ArrayList<>();
+        this.primaryKeyIndices = new ArrayList<>();
 
         StringBuilder fieldValues = new StringBuilder();
         StringBuilder keyValues = new StringBuilder();
@@ -657,7 +657,7 @@ public class UpdatableResultSet extends ResultSetImpl {
                     .append(StringUtils.quoteIdentifier(columnName, quotedId, this.pedantic)).toString();
 
             if (fields[i].isPrimaryKey()) {
-                this.primaryKeyIndicies.add(Integer.valueOf(i));
+                this.primaryKeyIndices.add(Integer.valueOf(i));
 
                 if (keyValues.length() > 0) {
                     keyValues.append(" AND ");
@@ -714,7 +714,7 @@ public class UpdatableResultSet extends ResultSetImpl {
     @Override
     public int getConcurrency() throws SQLException {
         synchronized (checkClosed().getConnectionMutex()) {
-            return (this.isUpdatable ? CONCUR_UPDATABLE : CONCUR_READ_ONLY);
+            return this.isUpdatable ? CONCUR_UPDATABLE : CONCUR_READ_ONLY;
         }
     }
 
@@ -740,12 +740,14 @@ public class UpdatableResultSet extends ResultSetImpl {
             byte[][] newRow = new byte[fields.length][];
 
             for (int i = 0; i < fields.length; i++) {
-                newRow[i] = this.inserter.isNull(i + 1) ? null : this.inserter.getBytesRepresentation(i + 1);
+                if (this.inserter.isNull(i + 1)) {
+                    newRow[i] = null;
+                }
 
                 // WARN: This non-variant only holds if MySQL never allows more than one auto-increment key (which is the way it is _today_)
                 if (fields[i].isAutoIncrement() && autoIncrementId > 0) {
                     newRow[i] = StringUtils.getBytes(String.valueOf(autoIncrementId));
-                    this.inserter.setBytesNoEscapeNoQuotes(i + 1, newRow[i]);
+                    this.inserter.setBytes(i + 1, newRow[i], false);
                 }
             }
 
@@ -842,42 +844,39 @@ public class UpdatableResultSet extends ResultSetImpl {
 
             for (int i = 0; i < numFields; i++) {
                 if (!this.populateInserterWithDefaultValues) {
-                    this.inserter.setBytesNoEscapeNoQuotes(i + 1, StringUtils.getBytes("DEFAULT"));
+                    this.inserter.setBytes(i + 1, StringUtils.getBytes("DEFAULT"), false);
                     newRowData = null;
-                } else {
-                    if (this.defaultColumnValue[i] != null) {
-                        Field f = fields[i];
+                } else if (this.defaultColumnValue[i] != null) {
+                    Field f = fields[i];
 
-                        switch (f.getMysqlTypeId()) {
-                            case MysqlType.FIELD_TYPE_DATE:
-                            case MysqlType.FIELD_TYPE_DATETIME:
-                            case MysqlType.FIELD_TYPE_TIME:
-                            case MysqlType.FIELD_TYPE_TIMESTAMP:
+                    switch (f.getMysqlTypeId()) {
+                        case MysqlType.FIELD_TYPE_DATE:
+                        case MysqlType.FIELD_TYPE_DATETIME:
+                        case MysqlType.FIELD_TYPE_TIME:
+                        case MysqlType.FIELD_TYPE_TIMESTAMP:
 
-                                if (this.defaultColumnValue[i].length > 7 && this.defaultColumnValue[i][0] == (byte) 'C'
-                                        && this.defaultColumnValue[i][1] == (byte) 'U' && this.defaultColumnValue[i][2] == (byte) 'R'
-                                        && this.defaultColumnValue[i][3] == (byte) 'R' && this.defaultColumnValue[i][4] == (byte) 'E'
-                                        && this.defaultColumnValue[i][5] == (byte) 'N' && this.defaultColumnValue[i][6] == (byte) 'T'
-                                        && this.defaultColumnValue[i][7] == (byte) '_') {
-                                    this.inserter.setBytesNoEscapeNoQuotes(i + 1, this.defaultColumnValue[i]);
+                            if (this.defaultColumnValue[i].length > 7 && this.defaultColumnValue[i][0] == (byte) 'C'
+                                    && this.defaultColumnValue[i][1] == (byte) 'U' && this.defaultColumnValue[i][2] == (byte) 'R'
+                                    && this.defaultColumnValue[i][3] == (byte) 'R' && this.defaultColumnValue[i][4] == (byte) 'E'
+                                    && this.defaultColumnValue[i][5] == (byte) 'N' && this.defaultColumnValue[i][6] == (byte) 'T'
+                                    && this.defaultColumnValue[i][7] == (byte) '_') {
+                                this.inserter.setBytes(i + 1, this.defaultColumnValue[i], false);
+                            } else {
+                                this.inserter.setBytes(i + 1, this.defaultColumnValue[i]);
+                            }
+                            break;
 
-                                } else {
-                                    this.inserter.setBytes(i + 1, this.defaultColumnValue[i], false, false);
-                                }
-                                break;
-
-                            default:
-                                this.inserter.setBytes(i + 1, this.defaultColumnValue[i], false, false);
-                        }
-
-                        // This value _could_ be changed from a getBytes(), so we need a copy....
-                        byte[] defaultValueCopy = new byte[this.defaultColumnValue[i].length];
-                        System.arraycopy(this.defaultColumnValue[i], 0, defaultValueCopy, 0, defaultValueCopy.length);
-                        newRowData[i] = defaultValueCopy;
-                    } else {
-                        this.inserter.setNull(i + 1, MysqlType.NULL);
-                        newRowData[i] = null;
+                        default:
+                            this.inserter.setBytes(i + 1, this.defaultColumnValue[i]);
                     }
+
+                    // This value _could_ be changed from a getBytes(), so we need a copy....
+                    byte[] defaultValueCopy = new byte[this.defaultColumnValue[i].length];
+                    System.arraycopy(this.defaultColumnValue[i], 0, defaultValueCopy, 0, defaultValueCopy.length);
+                    newRowData[i] = defaultValueCopy;
+                } else {
+                    this.inserter.setNull(i + 1, MysqlType.NULL);
+                    newRowData[i] = null;
                 }
             }
         }
@@ -929,7 +928,7 @@ public class UpdatableResultSet extends ResultSetImpl {
             SQLException sqlEx = null;
 
             if (this.useUsageAdvisor) {
-                if ((this.deleter == null) && (this.inserter == null) && (this.refresher == null) && (this.updater == null)) {
+                if (this.deleter == null && this.inserter == null && this.refresher == null && this.updater == null) {
                     this.eventSink.processEvent(ProfilerEvent.TYPE_USAGE, this.session, this.getOwningStatement(), this, 0, new Throwable(),
                             Messages.getString("UpdatableResultSet.34"));
                 }
@@ -1017,11 +1016,11 @@ public class UpdatableResultSet extends ResultSetImpl {
 
         this.refresher.clearParameters();
 
-        int numKeys = this.primaryKeyIndicies.size();
+        int numKeys = this.primaryKeyIndices.size();
 
         for (int i = 0; i < numKeys; i++) {
             byte[] dataFrom = null;
-            int index = this.primaryKeyIndicies.get(i).intValue();
+            int index = this.primaryKeyIndices.get(i).intValue();
 
             if (!this.doingUpdates && !this.onInsertRow) {
                 this.setParamValue(this.refresher, i + 1, this.thisRow, index, this.getMetadata().getFields()[index]);
@@ -1031,26 +1030,12 @@ public class UpdatableResultSet extends ResultSetImpl {
             dataFrom = updateInsertStmt.getBytesRepresentation(index + 1);
 
             // Primary keys not set?
-            if (updateInsertStmt.isNull(index + 1) || (dataFrom.length == 0)) {
+            if (updateInsertStmt.isNull(index + 1) || dataFrom.length == 0) {
                 this.setParamValue(this.refresher, i + 1, this.thisRow, index, this.getMetadata().getFields()[index]);
                 continue;
             }
-            dataFrom = StringUtils.stripEnclosure(dataFrom, "_binary'", "'");
 
-            byte[] origBytes = updateInsertStmt.getOrigBytes(i + 1);
-            if (origBytes != null) {
-                // It happens when updateInsertStmt parameter is set as a HEX literal.
-                // We need to avoid quotation in this case.
-                if (this.refresher instanceof ServerPreparedStatement) {
-                    // Server-side prepared statement does not recognize HEX literal sent as a parameter to execute command,
-                    // it's treated as a usual string and quoted on server side. Thus we send original bytes instead.
-                    this.refresher.setBytesNoEscapeNoQuotes(i + 1, origBytes);
-                } else {
-                    this.refresher.setBytesNoEscapeNoQuotes(i + 1, dataFrom);
-                }
-            } else {
-                this.refresher.setBytesNoEscape(i + 1, dataFrom);
-            }
+            this.refresher.getQueryBindings().setFromBindValue(i, updateInsertStmt.getQueryBindings().getBindValues()[index]);
         }
 
         java.sql.ResultSet rs = null;
@@ -1063,7 +1048,7 @@ public class UpdatableResultSet extends ResultSetImpl {
             if (rs.next()) {
                 for (int i = 0; i < numCols; i++) {
                     byte[] val = rs.getBytes(i + 1);
-                    rowToRefresh.setBytes(i, (val == null) || rs.wasNull() ? null : val);
+                    rowToRefresh.setBytes(i, val == null || rs.wasNull() ? null : val);
                 }
             } else {
                 throw SQLError.createSQLException(Messages.getString("UpdatableResultSet.12"), MysqlErrorNumbers.SQL_STATE_GENERAL_ERROR,
@@ -1130,7 +1115,7 @@ public class UpdatableResultSet extends ResultSetImpl {
     /**
      * Reset UPDATE prepared statement to value in current row. This_Row MUST
      * point to current, valid row.
-     * 
+     *
      * @throws SQLException
      *             if an error occurs
      */
@@ -1171,9 +1156,9 @@ public class UpdatableResultSet extends ResultSetImpl {
             }
         }
 
-        int numKeys = this.primaryKeyIndicies.size();
+        int numKeys = this.primaryKeyIndices.size();
         for (int i = 0; i < numKeys; i++) {
-            int idx = this.primaryKeyIndicies.get(i).intValue();
+            int idx = this.primaryKeyIndices.get(i).intValue();
             this.setParamValue(this.updater, numFields + i + 1, this.thisRow, idx, fields[idx]);
         }
     }
@@ -1550,7 +1535,7 @@ public class UpdatableResultSet extends ResultSetImpl {
     /**
      * Internal setObject implementation. Although targetType is not part of default ResultSet methods signatures, it is used for type conversions from
      * JDBC42UpdatableResultSet new JDBC 4.2 updateObject() methods.
-     * 
+     *
      * @param columnIndex
      *            column index
      * @param x
@@ -1575,7 +1560,7 @@ public class UpdatableResultSet extends ResultSetImpl {
 
     /**
      * Internal setObject implementation.
-     * 
+     *
      * @param columnIndex
      *            column index
      * @param x

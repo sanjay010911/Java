@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -32,7 +32,7 @@ package testsuite.regression;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -46,10 +46,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Properties;
-import java.util.concurrent.Callable;
 
 import org.junit.jupiter.api.Test;
 
+import com.mysql.cj.conf.PropertyDefinitions.SslMode;
 import com.mysql.cj.conf.PropertyKey;
 import com.mysql.cj.util.StringUtils;
 
@@ -59,6 +59,7 @@ import testsuite.BaseTestCase;
  * Tests fixes for BLOB handling.
  */
 public class BlobRegressionTest extends BaseTestCase {
+
     /**
      * @throws Exception
      */
@@ -90,35 +91,61 @@ public class BlobRegressionTest extends BaseTestCase {
 
         assertTrue(blob.length() == blobData.length, "Blob changed length");
 
-        assertTrue(((newBlobData[3] == 2) && (newBlobData[4] == 2) && (newBlobData[5] == 2) && (newBlobData[6] == 2)), "New data inserted wrongly");
+        assertTrue(newBlobData[3] == 2 && newBlobData[4] == 2 && newBlobData[5] == 2 && newBlobData[6] == 2, "New data inserted wrongly");
 
         //
         // Test end-point insertion
         //
         blob.setBytes(32, new byte[] { 2, 2, 2, 2 });
 
-        assertTrue(blob.length() == (blobData.length + 3), "Blob length should be 3 larger");
+        assertTrue(blob.length() == blobData.length + 3, "Blob length should be 3 larger");
     }
 
     /**
      * http://bugs.mysql.com/bug.php?id=22891
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testUpdateLongBlobGT16M() throws Exception {
-        byte[] blobData = new byte[18 * 1024 * 1024]; // 18M blob
+        this.rs = this.stmt.executeQuery("SHOW VARIABLES LIKE 'max_allowed_packet'");
+        this.rs.next();
+        long len = 4 + 1024 * 1024 * 36 + "UPDATE testUpdateLongBlob SET blobField=".length();
+        long defaultMaxAllowedPacket = this.rs.getInt(2);
+        boolean changeMaxAllowedPacket = defaultMaxAllowedPacket < len;
 
-        createTable("testUpdateLongBlob", "(blobField LONGBLOB)");
-        this.stmt.executeUpdate("INSERT INTO testUpdateLongBlob (blobField) VALUES (NULL)");
-
-        this.pstmt = this.conn.prepareStatement("UPDATE testUpdateLongBlob SET blobField=?");
-        this.pstmt.setBytes(1, blobData);
+        Connection con1 = null;
+        Connection con2 = null;
         try {
-            this.pstmt.executeUpdate();
-        } catch (SQLException sqlEx) {
-            if (sqlEx.getMessage().indexOf("max_allowed_packet") != -1) {
-                fail("You need to increase max_allowed_packet to at least 18M before running this test!");
+            if (changeMaxAllowedPacket) {
+                this.stmt.executeUpdate("SET GLOBAL max_allowed_packet=" + 1024 * 1024 * 37);
+            }
+            byte[] blobData = new byte[18 * 1024 * 1024]; // 18M blob
+
+            createTable("testUpdateLongBlob", "(blobField LONGBLOB)");
+            this.stmt.executeUpdate("INSERT INTO testUpdateLongBlob (blobField) VALUES (NULL)");
+
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            con1 = getConnectionWithProps(props);
+            this.pstmt = con1.prepareStatement("UPDATE testUpdateLongBlob SET blobField=?");
+            this.pstmt.setBytes(1, blobData);
+            try {
+                this.pstmt.executeUpdate();
+            } catch (SQLException sqlEx) {
+                assertTrue(sqlEx.getMessage().indexOf("max_allowed_packet") == -1,
+                        "You need to increase max_allowed_packet to at least 18M before running this test!");
+            }
+        } finally {
+            if (changeMaxAllowedPacket) {
+                this.stmt.executeUpdate("SET GLOBAL max_allowed_packet=" + defaultMaxAllowedPacket);
+            }
+            if (con1 != null) {
+                con1.close();
+            }
+            if (con2 != null) {
+                con2.close();
             }
         }
     }
@@ -164,7 +191,6 @@ public class BlobRegressionTest extends BaseTestCase {
 
             assertTrue(origValue == newValue, "Original byte at position " + i + ", " + origValue + " != new value, " + newValue);
         }
-
     }
 
     @Test
@@ -194,7 +220,7 @@ public class BlobRegressionTest extends BaseTestCase {
 
     /**
      * Tests BUG#8096 where emulated locators corrupt binary data when using server-side prepared statements.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -202,6 +228,8 @@ public class BlobRegressionTest extends BaseTestCase {
         int dataSize = 256;
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.emulateLocators.getKeyName(), "true");
         Connection locatorConn = getConnectionWithProps(props);
 
@@ -261,12 +289,11 @@ public class BlobRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#9040 - PreparedStatement.addBatch() doesn't work with server-side prepared statements and streaming BINARY data.
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug9040() throws Exception {
-
         createTable("testBug9040", "(primary_key int not null primary key, data mediumblob)");
 
         this.pstmt = this.conn.prepareStatement("replace into testBug9040 (primary_key, data) values(?,?)");
@@ -324,7 +351,7 @@ public class BlobRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#20453671 - CLOB.POSITION() API CALL WITH CLOB INPUT RETURNS EXCEPTION
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -334,17 +361,13 @@ public class BlobRegressionTest extends BaseTestCase {
 
         final Clob in = this.rs.getClob(1);
         final ResultSet locallyScopedRs = this.rs;
-        assertThrows(SQLException.class, "Illegal starting position for search, '0'", new Callable<Void>() {
-            public Void call() throws Exception {
-                in.position(locallyScopedRs.getClob(2), 0);
-                return null;
-            }
+        assertThrows(SQLException.class, "Illegal starting position for search, '0'", () -> {
+            in.position(locallyScopedRs.getClob(2), 0);
+            return null;
         });
-        assertThrows(SQLException.class, "Starting position for search is past end of CLOB", new Callable<Void>() {
-            public Void call() throws Exception {
-                in.position(locallyScopedRs.getClob(2), 10);
-                return null;
-            }
+        assertThrows(SQLException.class, "Starting position for search is past end of CLOB", () -> {
+            in.position(locallyScopedRs.getClob(2), 10);
+            return null;
         });
 
         assertEquals(1, in.position(this.rs.getClob(2), 1));
@@ -357,7 +380,7 @@ public class BlobRegressionTest extends BaseTestCase {
     /**
      * Tests fix for BUG#20453712 - CLOB.SETSTRING() WITH VALID INPUT RETURNS EXCEPTION
      * server-side prepared statements and streaming BINARY data.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -368,19 +391,15 @@ public class BlobRegressionTest extends BaseTestCase {
         final Clob c1 = this.rs.getClob(1);
 
         // check with wrong position
-        assertThrows(SQLException.class, "Starting position can not be < 1", new Callable<Void>() {
-            public Void call() throws Exception {
-                c1.setString(0, s1, 7, 4);
-                return null;
-            }
+        assertThrows(SQLException.class, "Starting position can not be < 1", () -> {
+            c1.setString(0, s1, 7, 4);
+            return null;
         });
 
         // check with wrong substring index
-        Throwable t = assertThrows(SQLException.class, new Callable<Void>() {
-            public Void call() throws Exception {
-                c1.setString(1, s1, 8, 4);
-                return null;
-            }
+        Throwable t = assertThrows(SQLException.class, () -> {
+            c1.setString(1, s1, 8, 4);
+            return null;
         });
 
         assertTrue(StringIndexOutOfBoundsException.class.isAssignableFrom(t.getCause().getClass()));
@@ -400,38 +419,71 @@ public class BlobRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for Bug#23535571 - EXCESSIVE MEMORY USAGE WHEN ENABLEPACKETDEBUG=TRUE
-     * 
+     *
      * @throws Exception
      */
     @Test
     public void testBug23535571() throws Exception {
+        this.rs = this.stmt.executeQuery("SHOW VARIABLES LIKE 'max_allowed_packet'");
+        this.rs.next();
+        long len = 4 + 1024 * 1024 * 36 + "UPDATE testBug23535571 SET blobField=".length();
+        long defaultMaxAllowedPacket = this.rs.getInt(2);
+        boolean changeMaxAllowedPacket = defaultMaxAllowedPacket < len;
+
+        if (!versionMeetsMinimum(5, 7)) {
+            this.rs = this.stmt.executeQuery("SHOW VARIABLES LIKE 'innodb_log_file_size'");
+            this.rs.next();
+            long defaultInnodbLogFileSize = this.rs.getInt(2);
+            assumeFalse(defaultInnodbLogFileSize < 1024 * 1024 * 36 * 10, "This test requires innodb_log_file_size > " + 1024 * 1024 * 36 * 10);
+        }
 
         createTable("testBug23535571", "(blobField LONGBLOB)");
         this.stmt.executeUpdate("INSERT INTO testBug23535571 (blobField) VALUES (NULL)");
 
-        // Insert 1 record with 18M data
-        byte[] blobData = new byte[18 * 1024 * 1024];
-        this.pstmt = this.conn.prepareStatement("UPDATE testBug23535571 SET blobField=?");
-        this.pstmt.setBytes(1, blobData);
-        this.pstmt.executeUpdate();
+        Connection con1 = null;
+        Connection con2 = null;
+        try {
+            if (changeMaxAllowedPacket) {
+                this.stmt.executeUpdate("SET GLOBAL max_allowed_packet=" + 1024 * 1024 * 37);
+            }
 
-        Properties props = new Properties();
-        props.setProperty(PropertyKey.enablePacketDebug.getKeyName(), "true");
-        Connection con = getConnectionWithProps(props);
+            Properties props = new Properties();
+            props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+            props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+            con1 = getConnectionWithProps(props);
 
-        for (int i = 0; i < 100; i++) {
-            this.pstmt = con.prepareStatement("select * from testBug23535571");
-            this.rs = this.pstmt.executeQuery();
-            this.rs.close();
-            this.pstmt.close();
-            Thread.sleep(100);
+            // Insert 1 record with 18M data
+            byte[] blobData = new byte[18 * 1024 * 1024];
+            this.pstmt = con1.prepareStatement("UPDATE testBug23535571 SET blobField=?");
+            this.pstmt.setBytes(1, blobData);
+            this.pstmt.executeUpdate();
+
+            props.setProperty(PropertyKey.enablePacketDebug.getKeyName(), "true");
+            con2 = getConnectionWithProps(props);
+
+            for (int i = 0; i < 100; i++) {
+                this.pstmt = con2.prepareStatement("select * from testBug23535571");
+                this.rs = this.pstmt.executeQuery();
+                this.rs.close();
+                this.pstmt.close();
+                Thread.sleep(100);
+            }
+        } finally {
+            if (changeMaxAllowedPacket) {
+                this.stmt.executeUpdate("SET GLOBAL max_allowed_packet=" + defaultMaxAllowedPacket);
+            }
+            if (con1 != null) {
+                con1.close();
+            }
+            if (con2 != null) {
+                con2.close();
+            }
         }
-
     }
 
     /**
      * Tests BUG#95210, ClassCastException in BlobFromLocator when connecting as jdbc:mysql:replication.
-     * 
+     *
      * @throws Exception
      */
     @Test
@@ -440,6 +492,8 @@ public class BlobRegressionTest extends BaseTestCase {
         this.stmt.executeUpdate("INSERT INTO testBug95210 (ID, DATA) VALUES (1, '111')");
 
         Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name()); // testsuite is built upon non-SSL default connection
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
         props.setProperty(PropertyKey.emulateLocators.getKeyName(), "true");
         Connection locatorConn = getSourceReplicaReplicationConnection(props);
 
@@ -449,4 +503,5 @@ public class BlobRegressionTest extends BaseTestCase {
         byte[] result = b.getBytes(1, 3); // the error was here
         assertEquals("111", StringUtils.toString(result));
     }
+
 }

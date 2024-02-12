@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -32,7 +32,6 @@ package testsuite.x.devapi;
 import static com.mysql.cj.xdevapi.Expression.expr;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.io.StringReader;
@@ -53,10 +52,9 @@ import com.mysql.cj.xdevapi.SqlResult;
 import com.mysql.cj.xdevapi.Table;
 
 public class TableInsertTest extends BaseTableTestCase {
+
     @Test
     public void lastInsertId() {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists lastInsertId");
             sqlUpdate("create table lastInsertId (id int not null primary key auto_increment, name varchar(20) not null)");
@@ -72,8 +70,6 @@ public class TableInsertTest extends BaseTableTestCase {
 
     @Test
     public void basicInsert() {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists basicInsert");
             sqlUpdate("drop view if exists basicInsertView");
@@ -142,8 +138,6 @@ public class TableInsertTest extends BaseTableTestCase {
 
     @Test
     public void jsonInsert() throws IOException {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists jsonInsert");
             sqlUpdate("create table jsonInsert (_id varchar(32), doc JSON)");
@@ -187,8 +181,6 @@ public class TableInsertTest extends BaseTableTestCase {
 
     @Test
     public void testGetAutoIncrementValueAsync() throws Exception {
-        assumeTrue(this.isSetForXTests);
-
         try {
             SqlResult res = this.session.sql("drop table if exists mytab").executeAsync().get();
             res = this.session.sql("create table mytab (x bigint auto_increment primary key,y int)").executeAsync().get();
@@ -239,8 +231,6 @@ public class TableInsertTest extends BaseTableTestCase {
 
     @Test
     public void testExprInInsert() {
-        assumeTrue(this.isSetForXTests);
-
         try {
             sqlUpdate("drop table if exists qatablex");
             sqlUpdate("create table qatablex (x char(100),y bigint,z int)");
@@ -281,8 +271,6 @@ public class TableInsertTest extends BaseTableTestCase {
 
     @Test
     public void testGetAutoIncrementValue() {
-        assumeTrue(this.isSetForXTests);
-
         Table table = null;
         InsertResult res = null;
         try {
@@ -354,4 +342,5 @@ public class TableInsertTest extends BaseTableTestCase {
             sqlUpdate("drop table if exists qatable2");
         }
     }
+
 }

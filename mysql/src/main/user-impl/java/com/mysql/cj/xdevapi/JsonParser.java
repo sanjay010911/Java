@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -43,6 +43,7 @@ import com.mysql.cj.exceptions.WrongArgumentException;
 public class JsonParser {
 
     enum Whitespace {
+
         TAB('\u0009'), LF('\n'), CR('\r'), SPACE('\u0020');
 
         public final char CHAR;
@@ -50,9 +51,11 @@ public class JsonParser {
         private Whitespace(char character) {
             this.CHAR = character;
         }
-    };
+
+    }
 
     enum StructuralToken {
+
         /**
          * [ U+005B left square bracket
          */
@@ -84,57 +87,61 @@ public class JsonParser {
             this.CHAR = character;
         }
 
-    };
+    }
 
     enum EscapeChar {
+
         /**
-         * \" represents the quotation mark character (U+0022)
+         * \\" represents the quotation mark character (U+0022)
          */
-        QUOTE('\u0022', "\\\""),
+        QUOTE('\u0022', "\\\"", true),
         /**
-         * \\ represents the reverse solidus character (U+005C)
+         * \\\\ represents the reverse solidus character (U+005C)
          */
-        RSOLIDUS('\\', "\\\\"),
+        RSOLIDUS('\\', "\\\\", true),
         /**
-         * \/ represents the solidus character (U+002F)
+         * \\/ represents the solidus character (U+002F)
          */
-        SOLIDUS('\u002F', "\\\u002F"),
+        SOLIDUS('\u002F', "\\\u002F", false),
         /**
-         * \b represents the backspace character (U+0008)
+         * \\b represents the backspace character (U+0008)
          */
-        BACKSPACE('\u0008', "\\b"),
+        BACKSPACE('\u0008', "\\b", true),
         /**
-         * \f represents the form feed character (U+000C)
+         * \\f represents the form feed character (U+000C)
          */
-        FF('\u000C', "\\f"),
+        FF('\u000C', "\\f", true),
         /**
-         * \n represents the line feed character (U+000A)
+         * \\n represents the line feed character (U+000A)
          */
-        LF('\n', "\\n"),
+        LF('\n', "\\n", true),
         /**
-         * \r represents the carriage return character (U+000D)
+         * \\r represents the carriage return character (U+000D)
          */
-        CR('\r', "\\r"),
+        CR('\r', "\\r", true),
         /**
-         * \t represents the character tabulation character (U+0009)
+         * \\t represents the character tabulation character (U+0009)
          */
-        TAB('\t', "\\t");
+        TAB('\t', "\\t", true);
 
         public final char CHAR;
         public final String ESCAPED;
+        public final boolean NEEDS_ESCAPING;
 
-        private EscapeChar(char character, String escaped) {
+        private EscapeChar(char character, String escaped, boolean needsEscaping) {
             this.CHAR = character;
             this.ESCAPED = escaped;
+            this.NEEDS_ESCAPING = needsEscaping;
         }
-    };
+
+    }
 
     static Set<Character> whitespaceChars = new HashSet<>();
-    static HashMap<Character, Character> unescapeChars = new HashMap<>();
+    static HashMap<Character, Character> escapeChars = new HashMap<>();
 
     static {
         for (EscapeChar ec : EscapeChar.values()) {
-            unescapeChars.put(ec.ESCAPED.charAt(1), ec.CHAR);
+            escapeChars.put(ec.ESCAPED.charAt(1), ec.CHAR);
         }
         for (Whitespace ws : Whitespace.values()) {
             whitespaceChars.add(ws.CHAR);
@@ -147,7 +154,7 @@ public class JsonParser {
 
     /**
      * Create {@link DbDoc} object from JSON string.
-     * 
+     *
      * @param jsonString
      *            JSON string representing a document
      * @return New {@link DbDoc} object initialized by parsed JSON string.
@@ -162,7 +169,7 @@ public class JsonParser {
 
     /**
      * Create {@link DbDoc} object from JSON string provided by reader.
-     * 
+     *
      * @param reader
      *            JSON string reader.
      * @return
@@ -171,7 +178,6 @@ public class JsonParser {
      *             if can't read
      */
     public static DbDoc parseDoc(StringReader reader) throws IOException {
-
         DbDoc doc = new DbDocImpl();
         JsonValue val;
 
@@ -202,10 +208,8 @@ public class JsonParser {
             } else if (ch == StructuralToken.RCRBRACKET.CHAR) {
                 rightBrackets++;
                 break;
-            } else {
-                if (!whitespaceChars.contains(ch)) {
-                    throw ExceptionFactory.createException(WrongArgumentException.class, Messages.getString("JsonParser.1", new Character[] { ch }));
-                }
+            } else if (!whitespaceChars.contains(ch)) {
+                throw ExceptionFactory.createException(WrongArgumentException.class, Messages.getString("JsonParser.1", new Character[] { ch }));
             }
         }
 
@@ -221,7 +225,7 @@ public class JsonParser {
 
     /**
      * Create {@link JsonArray} object from JSON string provided by reader.
-     * 
+     *
      * @param reader
      *            JSON string reader.
      * @return
@@ -230,7 +234,6 @@ public class JsonParser {
      *             if can't read
      */
     public static JsonArray parseArray(StringReader reader) throws IOException {
-
         JsonArray arr = new JsonArray();
         JsonValue val;
         int openings = 0;
@@ -316,7 +319,7 @@ public class JsonParser {
                 reader.reset();
                 return parseDoc(reader);
 
-            } else if (ch == '\u002D' || (ch >= '\u0030' && ch <= '\u0039')) { // {-,0-9}
+            } else if (ch == '\u002D' || ch >= '\u0030' && ch <= '\u0039') { // {-,0-9}
                 // Number detected
                 reader.reset();
                 return parseNumber(reader);
@@ -361,7 +364,7 @@ public class JsonParser {
 
     /**
      * Create {@link JsonString} object from JSON string provided by reader.
-     * 
+     *
      * @param reader
      *            JSON string reader.
      * @return
@@ -379,8 +382,23 @@ public class JsonParser {
         while ((intch = reader.read()) != -1) {
             char ch = (char) intch;
             if (escapeNextChar) {
-                if (unescapeChars.containsKey(ch)) {
-                    appendChar(sb, unescapeChars.get(ch));
+                if (escapeChars.containsKey(ch)) {
+                    appendChar(sb, escapeChars.get(ch));
+                } else if (ch == 'u') {
+                    // \\u[4 hex digits] represents a unicode code point (ISO/IEC 10646)
+                    char[] buf = new char[4];
+                    int countRead = reader.read(buf);
+                    String hexCodePoint = countRead == -1 ? "" : String.valueOf(buf, 0, countRead);
+                    if (countRead != 4) {
+                        throw ExceptionFactory.createException(WrongArgumentException.class,
+                                Messages.getString("JsonParser.13", new String[] { hexCodePoint }));
+                    }
+                    try {
+                        appendChar(sb, (char) Integer.parseInt(hexCodePoint, 16));
+                    } catch (NumberFormatException e) {
+                        throw ExceptionFactory.createException(WrongArgumentException.class,
+                                Messages.getString("JsonParser.13", new String[] { hexCodePoint }));
+                    }
                 } else {
                     throw ExceptionFactory.createException(WrongArgumentException.class, Messages.getString("JsonParser.7", new Character[] { ch }));
                 }
@@ -418,7 +436,7 @@ public class JsonParser {
 
     /**
      * Create {@link JsonNumber} object from JSON string provided by reader.
-     * 
+     *
      * @param reader
      *            JSON string reader.
      * @return
@@ -427,7 +445,6 @@ public class JsonParser {
      *             if can't read
      */
     static JsonNumber parseNumber(StringReader reader) throws IOException {
-
         StringBuilder sb = null;
         char lastChar = ' ';
         boolean hasFractionalPart = false;
@@ -522,7 +539,7 @@ public class JsonParser {
 
     /**
      * Create {@link JsonLiteral} object from JSON string provided by reader.
-     * 
+     *
      * @param reader
      *            JSON string reader.
      * @return

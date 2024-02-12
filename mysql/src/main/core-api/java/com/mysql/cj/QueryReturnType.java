@@ -30,47 +30,8 @@
 package com.mysql.cj;
 
 /**
- * An internal representation of a query attribute bind value.
- * 
+ * The possible return types from executing queries.
  */
-public interface QueryAttributesBindValue {
-    /**
-     * Checks whether this query attribute is the <code>null</code> value.
-     * 
-     * @return
-     *         <code>true</code> if this query attribute value is <code>null</code>.
-     */
-    boolean isNull();
-
-    /**
-     * Gets the name of this query attribute.
-     * 
-     * @return
-     *         the name of this query attribute.
-     */
-    String getName();
-
-    /**
-     * Gets the type of this query attribute. Query attributes types are one of the {@link MysqlType}.FIELD_TYPE_*.
-     * 
-     * @return
-     *         the type of this query attribute.
-     */
-    int getType();
-
-    /**
-     * Gets the value of this query attribute.
-     * 
-     * @return
-     *         the value of this query attribute.
-     */
-    Object getValue();
-
-    /**
-     * Gets the length of this query attribute.
-     * 
-     * @return
-     *         the expected length, in Bytes, of this query attribute value after being encoded.
-     */
-    long getBoundLength();
+public enum QueryReturnType {
+    PRODUCES_RESULT_SET, MAY_PRODUCE_RESULT_SET, DOES_NOT_PRODUCE_RESULT_SET, NONE;
 }

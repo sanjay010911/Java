@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2002, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -59,18 +59,26 @@ import com.mysql.cj.exceptions.WrongArgumentException;
  * Time zone conversion routines and other time related methods
  */
 public class TimeUtil {
+
     static final TimeZone GMT_TIMEZONE = TimeZone.getTimeZone("GMT");
+
+    public static final LocalDate DEFAULT_DATE = LocalDate.of(1970, 1, 1);
+    public static final LocalTime DEFAULT_TIME = LocalTime.of(0, 0);
 
     public static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     public static final DateTimeFormatter TIME_FORMATTER_NO_FRACT_NO_OFFSET = DateTimeFormatter.ofPattern("HH:mm:ss");
     public static final DateTimeFormatter TIME_FORMATTER_WITH_NANOS_NO_OFFSET = DateTimeFormatter.ofPattern("HH:mm:ss.SSSSSSSSS");
     public static final DateTimeFormatter TIME_FORMATTER_NO_FRACT_WITH_OFFSET = DateTimeFormatter.ofPattern("HH:mm:ssXXX");
     public static final DateTimeFormatter TIME_FORMATTER_WITH_NANOS_WITH_OFFSET = DateTimeFormatter.ofPattern("HH:mm:ss.SSSSSSSSSXXX");
+    public static final DateTimeFormatter TIME_FORMATTER_WITH_OPTIONAL_MICROS = new DateTimeFormatterBuilder().appendPattern("HH:mm:ss")
+            .appendFraction(ChronoField.NANO_OF_SECOND, 0, 6, true).toFormatter();
     public static final DateTimeFormatter DATETIME_FORMATTER_NO_FRACT_NO_OFFSET = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     public static final DateTimeFormatter DATETIME_FORMATTER_WITH_MILLIS_NO_OFFSET = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
     public static final DateTimeFormatter DATETIME_FORMATTER_WITH_NANOS_NO_OFFSET = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSSSSS");
     public static final DateTimeFormatter DATETIME_FORMATTER_NO_FRACT_WITH_OFFSET = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ssXXX");
     public static final DateTimeFormatter DATETIME_FORMATTER_WITH_NANOS_WITH_OFFSET = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSSSSSXXX");
+    public static final DateTimeFormatter DATETIME_FORMATTER_WITH_OPTIONAL_MICROS = new DateTimeFormatterBuilder().appendPattern("yyyy-MM-dd HH:mm:ss")
+            .appendFraction(ChronoField.NANO_OF_SECOND, 0, 6, true).toFormatter();
 
     public static final Pattern DATE_LITERAL_WITH_DELIMITERS = Pattern
             .compile("(\\d{4}|\\d{2})[\\p{Punct}&&[^:]](([0])?[1-9]|[1][0-2])[\\p{Punct}&&[^:]](([0])?[1-9]|[1-2]\\d|[3][0-1])");
@@ -104,9 +112,7 @@ public class TimeUtil {
 
         try {
             aMethod = System.class.getMethod("nanoTime", (Class[]) null);
-        } catch (SecurityException e) {
-            aMethod = null;
-        } catch (NoSuchMethodException e) {
+        } catch (SecurityException | NoSuchMethodException e) {
             aMethod = null;
         }
 
@@ -121,11 +127,7 @@ public class TimeUtil {
         if (systemNanoTimeMethod != null) {
             try {
                 return ((Long) systemNanoTimeMethod.invoke(null, (Object[]) null)).longValue();
-            } catch (IllegalArgumentException e) {
-                // ignore - fall through to currentTimeMillis()
-            } catch (IllegalAccessException e) {
-                // ignore - fall through to currentTimeMillis()
-            } catch (InvocationTargetException e) {
+            } catch (IllegalArgumentException | IllegalAccessException | InvocationTargetException e) {
                 // ignore - fall through to currentTimeMillis()
             }
         }
@@ -135,12 +137,12 @@ public class TimeUtil {
 
     /**
      * Returns the 'official' Java timezone name for the given timezone
-     * 
+     *
      * @param timezoneStr
      *            the 'common' timezone name
      * @param exceptionInterceptor
      *            exception interceptor
-     * 
+     *
      * @return the Java timezone name for the given timezone
      */
     public static String getCanonicalTimeZone(String timezoneStr, ExceptionInterceptor exceptionInterceptor) {
@@ -174,7 +176,7 @@ public class TimeUtil {
 
     /**
      * Return a new Timestamp object which value is adjusted according to known DATE, DATETIME or TIMESTAMP field precision.
-     * 
+     *
      * @param ts
      *            an original Timestamp object, not modified by this method
      * @param fsp
@@ -202,7 +204,7 @@ public class TimeUtil {
 
     /**
      * Return a new LocalDateTime object which value is adjusted according to known DATE, DATETIME or TIMESTAMP field precision.
-     * 
+     *
      * @param x
      *            an original LocalDateTime object, not modified by this method
      * @param fsp
@@ -261,7 +263,7 @@ public class TimeUtil {
     /**
      * Return a string representation of a fractional seconds part. This method assumes that all Timestamp adjustments are already done before,
      * thus no rounding is needed, only a proper "0" padding to be done.
-     * 
+     *
      * @param nanos
      *            fractional seconds value
      * @param fsp
@@ -275,7 +277,7 @@ public class TimeUtil {
     /**
      * Return a string representation of a fractional seconds part. This method assumes that all Timestamp adjustments are already done before,
      * thus no rounding is needed, only a proper "0" padding to be done.
-     * 
+     *
      * @param nanos
      *            fractional seconds value
      * @param fsp
@@ -319,7 +321,7 @@ public class TimeUtil {
 
     /**
      * Loads a properties file that contains all kinds of time zone mappings.
-     * 
+     *
      * @param exceptionInterceptor
      *            exception interceptor
      */
@@ -345,7 +347,7 @@ public class TimeUtil {
     }
 
     public static Time truncateFractionalSeconds(Time time) {
-        Time truncatedTime = new Time((time.getTime() / 1000) * 1000);
+        Time truncatedTime = new Time(time.getTime() / 1000 * 1000);
         return truncatedTime;
     }
 
@@ -358,7 +360,7 @@ public class TimeUtil {
      * <p>
      * Note: The SimpleDateFormat object returned by this method contains a default Calendar with an altered TimeZone. It's safe to cache it between this method
      * calls because the Calendar object itself is not altered.
-     * 
+     *
      * @param cachedSimpleDateFormat
      *            existing SimpleDateFormat to use instead of creating a new one
      * @param pattern
@@ -377,26 +379,27 @@ public class TimeUtil {
     }
 
     /**
-     * Get SimpleDateFormat where a default Calendar is replaced with the provided one.
+     * Get SimpleDateFormat where a default Calendar is replaced with a clone of the provided one.
      * <p>
      * Note: Don't cache the SimpleDateFormat object returned by this method. Other methods could rely on assumption that the cached SimpleDateFormat has a
      * default Calendar and that it is safe to change only it's time zone (see {@link #getSimpleDateFormat(SimpleDateFormat, String, TimeZone)}.
-     * 
+     *
      * @param pattern
      *            format pattern
      * @param cal
-     *            {@link Calendar} object replacing the default one
+     *            {@link Calendar} object which clone is replacing the default Calendar
      * @return {@link SimpleDateFormat} object
      */
     public static SimpleDateFormat getSimpleDateFormat(String pattern, Calendar cal) {
         SimpleDateFormat sdf = new SimpleDateFormat(pattern, Locale.US);
         if (cal != null) {
+            cal = (Calendar) cal.clone();
             sdf.setCalendar(cal);
         }
         return sdf;
     }
 
-    public static Object parseToDateTimeObject(String s, MysqlType targetMysqlType) throws IOException {
+    public static Object parseToDateTimeObject(String s, MysqlType targetMysqlType) {
         if (DATE_LITERAL_WITH_DELIMITERS.matcher(s).matches()) {
             return LocalDate.parse(getCanonicalDate(s), DateTimeFormatter.ISO_LOCAL_DATE);
 
@@ -449,7 +452,7 @@ public class TimeUtil {
         String[] sa = s.split("\\p{Punct}");
         StringBuilder sb = new StringBuilder();
         if (sa[0].length() == 2) {
-            sb.append(Integer.valueOf(sa[0]) > 69 ? "19" : "20");
+            sb.append(Integer.parseInt(sa[0]) > 69 ? "19" : "20");
         }
         sb.append(sa[0]);
         sb.append("-");
@@ -510,4 +513,5 @@ public class TimeUtil {
         }
         return s;
     }
+
 }

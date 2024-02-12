@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -30,7 +30,6 @@
 package com.mysql.cj.result;
 
 import java.sql.Date;
-import java.time.LocalDate;
 import java.util.Calendar;
 import java.util.Locale;
 import java.util.TimeZone;
@@ -44,11 +43,13 @@ import com.mysql.cj.exceptions.WrongArgumentException;
 import com.mysql.cj.protocol.InternalDate;
 import com.mysql.cj.protocol.InternalTime;
 import com.mysql.cj.protocol.InternalTimestamp;
+import com.mysql.cj.util.TimeUtil;
 
 /**
  * A value factory for creating {@link java.sql.Date} values.
  */
 public class SqlDateValueFactory extends AbstractDateTimeValueFactory<Date> {
+
     private WarningListener warningListener;
     // cached per instance to avoid re-creation on every create*() call
     private Calendar cal;
@@ -94,8 +95,7 @@ public class SqlDateValueFactory extends AbstractDateTimeValueFactory<Date> {
             // TODO: need column context
             this.warningListener.warningEncountered(Messages.getString("ResultSet.ImplicitDatePartWarning", new Object[] { "java.sql.Date" }));
         }
-
-        return Date.valueOf(LocalDate.of(1970, 1, 1));
+        return Date.valueOf(TimeUtil.DEFAULT_DATE);
     }
 
     @Override
@@ -120,7 +120,9 @@ public class SqlDateValueFactory extends AbstractDateTimeValueFactory<Date> {
         return createFromDate(its);
     }
 
+    @Override
     public String getTargetTypeName() {
         return Date.class.getName();
     }
+
 }

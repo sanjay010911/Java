@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2018, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -40,7 +40,6 @@ import com.mysql.cj.protocol.ServerCapabilities;
 import com.mysql.cj.protocol.ServerSession;
 
 public class XServerSession implements ServerSession {
-
     XServerCapabilities serverCapabilities = null;
 
     private TimeZone defaultTimeZone = TimeZone.getDefault();
@@ -67,16 +66,6 @@ public class XServerSession implements ServerSession {
 
     @Override
     public void setStatusFlags(int statusFlags, boolean saveOldStatusFlags) {
-        throw ExceptionFactory.createException(CJOperationNotSupportedException.class, "Not supported");
-    }
-
-    @Override
-    public int getOldStatusFlags() {
-        throw ExceptionFactory.createException(CJOperationNotSupportedException.class, "Not supported");
-    }
-
-    @Override
-    public void setOldStatusFlags(int statusFlags) {
         throw ExceptionFactory.createException(CJOperationNotSupportedException.class, "Not supported");
     }
 
@@ -137,6 +126,11 @@ public class XServerSession implements ServerSession {
 
     @Override
     public boolean hasLongColumnInfo() {
+        throw ExceptionFactory.createException(CJOperationNotSupportedException.class, "Not supported");
+    }
+
+    @Override
+    public boolean isSessionStateTrackingEnabled() {
         throw ExceptionFactory.createException(CJOperationNotSupportedException.class, "Not supported");
     }
 
@@ -225,14 +219,17 @@ public class XServerSession implements ServerSession {
         throw ExceptionFactory.createException(CJOperationNotSupportedException.class, "Not supported");
     }
 
+    @Override
     public TimeZone getSessionTimeZone() {
         throw ExceptionFactory.createException(CJOperationNotSupportedException.class, "Not supported");
     }
 
+    @Override
     public void setSessionTimeZone(TimeZone sessionTimeZone) {
         throw ExceptionFactory.createException(CJOperationNotSupportedException.class, "Not supported");
     }
 
+    @Override
     public TimeZone getDefaultTimeZone() {
         return this.defaultTimeZone;
     }
@@ -246,6 +243,6 @@ public class XServerSession implements ServerSession {
     @Override
     public void setCharsetSettings(CharsetSettings charsetSettings) {
         // TODO Auto-generated method stub
-
     }
+
 }

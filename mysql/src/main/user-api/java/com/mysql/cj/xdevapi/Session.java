@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates.
+ * Copyright (c) 2015, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -78,14 +78,14 @@ public interface Session {
 
     /**
      * Retrieve the list of Schema objects for which the current user has access.
-     * 
+     *
      * @return list of Schema objects
      */
     List<Schema> getSchemas();
 
     /**
      * Retrieve the Schema corresponding to name.
-     * 
+     *
      * @param schemaName
      *            name of schema to retrieve
      * @return {@link Schema}
@@ -93,22 +93,23 @@ public interface Session {
     Schema getSchema(String schemaName);
 
     /**
-     * Retrieve the default schema name which may be configured at connect time.
-     * 
-     * @return default schema name
+     * Retrieve the default schema name, which might have been configured at the time of connection. Returns empty String if no default schema has been set.
+     *
+     * @return default schema name or empty String if no default schema has been set
      */
     String getDefaultSchemaName();
 
     /**
-     * Retrieve the default schema which may be configured at connect time.
-     * 
-     * @return default {@link Schema}
+     * Retrieve the default schema name, which might have been configured at the time of connection. Returns <code>null</code> if no default schema has been
+     * set.
+     *
+     * @return default {@link Schema} or <code>null</code> if no default schema has been set
      */
     Schema getDefaultSchema();
 
     /**
      * Create and return a new schema with the name given by name.
-     * 
+     *
      * @param schemaName
      *            name of schema to create
      * @return {@link Schema} created
@@ -117,7 +118,7 @@ public interface Session {
 
     /**
      * Create and return a new schema with the name given by name. If the schema already exists, a reference to it is returned.
-     * 
+     *
      * @param schemaName
      *            name of schema to create
      * @param reuseExistingObject
@@ -128,7 +129,7 @@ public interface Session {
 
     /**
      * Drop the existing schema with the name given by name.
-     * 
+     *
      * @param schemaName
      *            name of schema to drop
      */
@@ -136,14 +137,14 @@ public interface Session {
 
     /**
      * Get the URL used to create this session.
-     * 
+     *
      * @return URI
      */
     String getUri();
 
     /**
      * Is this session open?
-     * 
+     *
      * @return true if session is open
      */
     boolean isOpen();
@@ -171,14 +172,14 @@ public interface Session {
     /**
      * Creates a transaction savepoint with an implementation-defined generated name and returns its name, which can be used in {@link #rollbackTo(String)} or
      * {@link #releaseSavepoint(String)}. Calling this method more than once should always work. The generated name shall be unique per session.
-     * 
+     *
      * @return savepoint name
      */
     String setSavepoint();
 
     /**
      * Creates or replaces a transaction savepoint with the given name. Calling this method more than once should always work.
-     * 
+     *
      * @param name
      *            savepoint name
      * @return savepoint name
@@ -188,7 +189,7 @@ public interface Session {
     /**
      * Rolls back the transaction to the named savepoint. This method will succeed as long as the given save point has not been already rolled back or
      * released. Rolling back to a savepoint prior to the one named will release or rollback any that came after.
-     * 
+     *
      * @param name
      *            savepoint name
      */
@@ -197,7 +198,7 @@ public interface Session {
     /**
      * Releases the named savepoint. This method will succeed as long as the given save point has not been already rolled back or
      * released. Rolling back to a savepoint prior to the one named will release or rollback any that came after.
-     * 
+     *
      * @param name
      *            savepoint name
      */
@@ -205,10 +206,11 @@ public interface Session {
 
     /**
      * Create a native SQL command. Placeholders are supported using the native "?" syntax.
-     * 
+     *
      * @param sql
      *            native SQL statement
      * @return {@link SqlStatement}
      */
     SqlStatement sql(String sql);
+
 }

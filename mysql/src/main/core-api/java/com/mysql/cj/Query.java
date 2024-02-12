@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2017, 2023, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 2.0, as published by the
@@ -44,7 +44,7 @@ public interface Query {
 
     /**
      * Returns the query id used when profiling
-     * 
+     *
      * @return id
      */
     int getId();
@@ -70,7 +70,7 @@ public interface Query {
      * The list is unmodifiable and might contain any combination of String,
      * ClientPreparedQueryBindings, or ServerPreparedQueryBindings depending on how the parameters were
      * batched.
-     * 
+     *
      * @return an unmodifiable List of batched args
      */
     List<Object> getBatchedArgs();
@@ -87,9 +87,9 @@ public interface Query {
 
     void setResultType(Resultset.Type resultSetType);
 
-    int getTimeoutInMillis();
+    long getTimeoutInMillis();
 
-    void setTimeoutInMillis(int timeoutInMillis);
+    void setTimeoutInMillis(long timeoutInMillis);
 
     void setExecuteTime(long executeTime);
 
@@ -100,7 +100,7 @@ public interface Query {
      */
     long getExecuteTime();
 
-    CancelQueryTask startQueryTimer(Query stmtToCancel, int timeout);
+    CancelQueryTask startQueryTimer(Query stmtToCancel, long timeout);
 
     AtomicBoolean getStatementExecuting();
 
@@ -115,4 +115,5 @@ public interface Query {
     void statementBegins();
 
     void stopQueryTimer(CancelQueryTask timeoutTask, boolean rethrowCancelReason, boolean checkCancelTimeout);
+
 }
