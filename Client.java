@@ -12,7 +12,7 @@ class Client
         String str1;
         String str;
         try{
-            cs=new Socket("localhost",1234);
+            cs=new Socket("103.214.233.242",1234);
             sin=new DataInputStream(cs.getInputStream());
             sout=new DataOutputStream(cs.getOutputStream());
             s=new Scanner(System.in);
