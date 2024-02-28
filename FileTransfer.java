@@ -2,31 +2,46 @@ import java.io.*;
 import java.net.*;
 class FileTransfer
 {
-    public static void uploadFile(Socket clientSocket, String filePath) throws IOException {
+   public static void uploadFile(Socket clientSocket, String filePath) throws IOException {
+    try (InputStream inputStream = clientSocket.getInputStream();
+         FileOutputStream fileOutputStream = new FileOutputStream(filePath);) {
 
-        InputStream inputStream = clientSocket.getInputStream();
-        FileOutputStream fileOutputStream = new FileOutputStream(filePath);
         byte[] buffer = new byte[1024];
         int bytesRead;
         while ((bytesRead = inputStream.read(buffer)) != -1) {
             fileOutputStream.write(buffer, 0, bytesRead);
         }
-        fileOutputStream.close();
-        inputStream.close();
+
+        // Add a small delay to ensure data transmission completion
+        Thread.sleep(100);
+
+    } catch (InterruptedException e) {
+        e.printStackTrace();
     }
+}
+
 
     
-    public static void downloadFile(Socket clientSocket, String filePath) throws IOException {
-        OutputStream outputStream = clientSocket.getOutputStream();
-        FileInputStream fileInputStream = new FileInputStream(filePath);
+   public static void downloadFile(Socket clientSocket, String filePath) throws IOException {
+    try (
+        InputStream inputStream = clientSocket.getInputStream();
+        FileOutputStream fileOutputStream = new FileOutputStream(filePath);
+    ) {
         byte[] buffer = new byte[1024];
         int bytesRead;
-        while ((bytesRead = fileInputStream.read(buffer)) != -1) {
-            outputStream.write(buffer, 0, bytesRead);
+        while ((bytesRead = inputStream.read(buffer)) != -1) {
+            fileOutputStream.write(buffer, 0, bytesRead);
         }
-        fileInputStream.close();
-        outputStream.close();
+        System.out.println("Download Complete");
+    } catch (IOException e) {
+        e.printStackTrace();
     }
+}
+
+
+
+
+
 
     public static void main(String args[])
     {
@@ -35,6 +50,7 @@ class FileTransfer
         DataInputStream sin;
         DataOutputStream sout;
         DataInputStream in=new DataInputStream(System.in);
+        
         try{
             while(true)
             {
@@ -56,17 +72,20 @@ class FileTransfer
                 }
                 else if(ch==2)
                 {
-                    System.out.println("Enter the Public Ip address of sender");
-                    String ip=in.readLine();
+                    // System.out.println("Enter the Public Ip address of sender");
+                    // String ip=in.readLine();
                     System.out.println("Before creating socket");
-                    cs = new Socket(ip, 5000);
+                    cs = new Socket("localhost", 5000);
                     System.out.println("After creating socket");
                     sin=new DataInputStream(cs.getInputStream());
                     System.out.println(sin.readUTF());
                     System.out.println("Enter the download path");
                     String path=in.readLine();
-                    downloadFile(cs,path);
+                    System.out.println("Enter the filename");
+                    String filename = in.readLine();
+                    downloadFile(cs, filename);
                     System.out.println("Download Complete");
+
                 }
                 else
                     System.exit(0);
