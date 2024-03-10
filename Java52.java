@@ -37,14 +37,15 @@ class Java52
 			System.out.println("Enter the number of employees");
 			n=Integer.parseInt(in.readLine());
 			emp=new employee[n];
-			for(i=1;i<=n;i++)
+			for(i=0;i<n;i++)
 			{
-				System.out.println("Enter the details of employee "+i);
+				System.out.println("Enter the details of employee "+(i+1));
+				emp[i]=new employee();
 				emp[i].read();
 			}
 			System.out.println("Enter the eno to search");
 			n=Integer.parseInt(in.readLine());
-			for(i=1;i<=n;i++)
+			for(i=0;i<n;i++)
 			{
 				if(emp[i].eno==n)
 				{
