@@ -12,14 +12,13 @@ class Java43
 	}
 	public static void one_to_n(int n)
 	{
-		if(n>=1)
+		int temp=n;
+		if(n!=1)
 		{
-			n--;
-			one_to_n(n);
+			temp--;
+			one_to_n(temp);
 		}
-		System.out.println(n);
-		
-			
+			System.out.println(n);	
 	}
 	public static void main(String args[])
 	{
