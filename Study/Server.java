@@ -4,19 +4,18 @@ class Server
 {
     public static void main(String args[])
     {
+        Socket cs;
+        ServerSocket ss;
         DataInputStream sin;
         DataOutputStream sout;
-        ServerSocket ss;
-        Socket cs;
         try{
             ss=new ServerSocket(1234);
             cs=ss.accept();
             sin=new DataInputStream(cs.getInputStream());
             sout=new DataOutputStream(cs.getOutputStream());
-            sout.writeUTF("Hii Client!!!");
-            String s=sin.readUTF();
-            System.out.println("Client Say :"+s);
-
+            String data = sin.readUTF();
+            System.out.println("Client says: " + data);
+            sout.writeUTF("Hi Client!!!");
         }
         catch(Exception e){}
     }
