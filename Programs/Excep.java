@@ -3,7 +3,7 @@ class MyEx extends Exception
 {
     public MyEx()
     {
-        super();
+       
     }
 
 
